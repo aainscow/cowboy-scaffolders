@@ -15,7 +15,9 @@ Big Terry's rule: *as long as it doesn't fall down, it's fine.*
 
 12 jobs, with tighter quotes, heavier loads and more chavs as you go. Stars for coming in well under the quote.
 
-Controls: left-click to build, right-drag to orbit, WASD/arrows (or the on-screen pad) to pan, wheel to zoom, Ctrl+Z to undo.
+Controls:
+- **Desktop:** click two dots to place a piece; hold and drag through dots to lay a chain of tubes. Drag empty space to pan, right-drag to orbit, wheel to zoom (or WASD/arrows and the on-screen pad). Ctrl+Z undoes.
+- **Phone/tablet:** tap two dots to place a piece; hold and drag to chain. Two fingers to move the camera. Landscape works best.
 
 ## Code
 

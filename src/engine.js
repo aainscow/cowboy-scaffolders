@@ -710,7 +710,7 @@ function segKey(a, b) { const s = a.join(','), t = b.join(','); return s < t ? s
 // Static requirement checks: platforms boarded + builder access.
 export function checkRequirements(level, pieces) {
   const sim = new Sim(level);
-  for (const p of pieces) sim.addPiece(p);
+  for (const p of pieces) sim.addPiece({ ...p });
   const zones = level.zones.map(z => {
     let covered = 0;
     for (let x = z.x0; x < z.x1; x++) if (sim.boardUnder(x + 0.5, z.y)) covered++;

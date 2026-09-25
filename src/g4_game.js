@@ -332,7 +332,7 @@ function setTool(id) {
 }
 function updateHelp() {
   const h = {
-    tube: '<b>Click</b> a dot, then another, to place a tube. Keep clicking to chain. <b>Drag</b> places one tube. Orange dots take base plates.',
+    tube: '<b>Click</b> a dot, then another, to place one tube. <b>Hold and drag</b> through dots to lay a chain of tubes. Orange dots take base plates.',
     heavy: 'Heavy tube: stiffer and much stronger. Place it like a normal tube.',
     board: '<b>Click or drag</b> along a horizontal tube to lay boards. Timber holds 360 kg at mid-span.',
     deck: '<b>Click or drag</b> along a horizontal tube to lay steel deck. Holds 1500 kg.',
@@ -342,7 +342,7 @@ function updateHelp() {
     order: '<b>Click pieces in the order you want them put up</b>, starting from #1. Anything you don\'t click keeps its place after. Use the order list to fine-tune.',
     erase: '<b>Click</b> a tube, board, ladder, lock or tie to remove it.',
   }[S.tool];
-  $('help').innerHTML = h + '<br><b>Right-drag</b> orbit · <b>WASD / arrows</b> or <b>Shift+right-drag</b> pan · <b>wheel</b> zoom · <b>Ctrl+Z</b> undo';
+  $('help').innerHTML = h + '<br><b>Drag empty space</b> to pan · <b>right-drag</b> to orbit · <b>wheel</b> to zoom · <b>Ctrl+Z</b> undo';
 }
 
 function pushUndo() { S.undo.push(JSON.stringify(S.pieces)); if (S.undo.length > 200) S.undo.shift(); }
@@ -528,11 +528,11 @@ cvs.addEventListener('pointerdown', (ev) => {
   if (ev.pointerType === 'touch' && !ev.isPrimary) return;
   const pt = pickLocal(ev);
   if (!pt) return;
-  downInfo = { x: ev.clientX, y: ev.clientY };
+  downInfo = { x: ev.clientX, y: ev.clientY, lx: ev.clientX, ly: ev.clientY, mouse: ev.pointerType === 'mouse' };
   if (S.tool === 'tube' || S.tool === 'heavy') {
     if (!S.chain) {
       const n = nearestNode(pt);
-      if (n && isStartable(n)) { S.drag = n; }
+      if (n && isStartable(n)) { S.drag = n; S.dragEnd = null; }
       else if (n) toast('Start from the ground (orange dots) or an existing joint');
     }
   } else if (S.tool === 'ladder') {
@@ -546,11 +546,49 @@ cvs.addEventListener('pointerdown', (ev) => {
     S.paint = { y: seg ? seg.a[1] : null, done: new Set() };
     if (seg) { S.paint.done.add(seg.a[0]); tryPlace(seg); }
   }
+  // a mouse press that didn't grab anything pans the view instead
+  downInfo.canPan = downInfo.mouse && !S.drag && !S.chain && !(S.paint && S.paint.y !== null);
 });
+function panByPixels(dx, dy) {
+  S.camGoal = null;
+  const dist = camera.position.distanceTo(controls.target);
+  const k = 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / window.innerHeight;
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+  const mv = right.multiplyScalar(-dx * k).addScaledVector(up, dy * k);
+  const t2 = controls.target.clone().add(mv);
+  t2.x = Math.max(-14, Math.min(14, t2.x)); t2.y = Math.max(0, Math.min(14, t2.y));
+  mv.subVectors(t2, controls.target);
+  controls.target.add(mv); camera.position.add(mv);
+}
+const sameDir = (a, b, c) => { const ux = b[0] - a[0], uy = b[1] - a[1], vx = c[0] - a[0], vy = c[1] - a[1]; return ux * vy - uy * vx === 0 && ux * vx + uy * vy > 0; };
+const segLen = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+// Holding and dragging lays a chain of tubes: one tube per straight run.
+function dragChain(pt) {
+  const n = nearestNode(pt, 0.35);
+  if (!n) return;
+  const A = S.drag, E = S.dragEnd;
+  if (n[0] === A[0] && n[1] === A[1]) return;
+  if (E && n[0] === E[0] && n[1] === E[1]) return;
+  const tool = S.tool;
+  if (!E) { if (segLen(A, n) <= MAX_LEN + 1e-6 && !validatePlacement(S.L, S.pieces, { type: tool, a: A, b: n })) S.dragEnd = n; return; }
+  if (sameDir(A, E, n) && segLen(A, n) <= MAX_LEN + 1e-6 && !validatePlacement(S.L, S.pieces, { type: tool, a: A, b: n })) { S.dragEnd = n; return; }
+  // direction changed (or too long): commit what we have and carry on from its end
+  if (tryPlace({ type: tool, a: A, b: E })) {
+    S.drag = E;
+    S.dragEnd = segLen(E, n) <= MAX_LEN + 1e-6 && !validatePlacement(S.L, S.pieces, { type: tool, a: E, b: n }) ? n : null;
+  }
+}
 cvs.addEventListener('pointermove', (ev) => {
   if (S.mode !== 'design') return;
   const pt = pickLocal(ev);
   S.hoverPt = pt;
+  if (downInfo && !downInfo.right && ev.buttons) {
+    const moved = Math.hypot(ev.clientX - downInfo.x, ev.clientY - downInfo.y);
+    if (downInfo.canPan && moved > 4) { panByPixels(ev.clientX - downInfo.lx, ev.clientY - downInfo.ly); downInfo.panned = true; }
+    if (S.drag && (S.tool === 'tube' || S.tool === 'heavy') && moved > 8 && pt) dragChain(pt);
+    downInfo.lx = ev.clientX; downInfo.ly = ev.clientY;
+  }
   if (S.paint && pt && S.paint.y !== null) {
     const x0 = Math.floor(pt.x);
     if (!S.paint.done.has(x0) && x0 >= 0 && x0 < S.L.W && Math.abs(pt.y - S.paint.y) < 0.8) {
@@ -566,24 +604,25 @@ window.addEventListener('pointerup', (ev) => {
   if (downInfo && downInfo.right) { if (moved < 5) S.chain = null; downInfo = null; return; }
   const pt = ev.target === cvs ? pickLocal(ev) : null;
   if (S.paint) { S.paint = null; downInfo = null; return; }
-  if (!pt || !downInfo) { S.drag = null; downInfo = null; return; }
   const tool = S.tool;
+  if ((tool === 'tube' || tool === 'heavy') && S.drag && moved > 8) {
+    // end of a held drag: lay the last straight run
+    if (pt) dragChain(pt);
+    if (S.dragEnd) tryPlace({ type: tool, a: S.drag, b: S.dragEnd });
+    S.drag = null; S.dragEnd = null; downInfo = null; return;
+  }
+  if (!pt || !downInfo || downInfo.panned) { S.drag = null; S.dragEnd = null; downInfo = null; return; }
   if (tool === 'tube' || tool === 'heavy') {
     if (S.drag) {
-      const tgt = tubeTarget(S.drag, pt);
-      const n = nearestNode(pt, 0.6);
-      if (moved > 8 && tgt && n) {
-        tryPlace({ type: tool, a: S.drag, b: tgt });
-      } else {
-        S.chain = S.drag;
-        sfx.click();
-      }
-      S.drag = null;
+      // a tap: remember the first point, the next tap places the tube
+      S.chain = S.drag; S.drag = null; S.dragEnd = null;
+      sfx.click();
     } else if (S.chain && moved < 8) {
-      const tgt = tubeTarget(S.chain, pt);
-      if (tgt) {
-        const p = { type: tool, a: S.chain, b: tgt };
-        if (tryPlace(p)) S.chain = tgt;
+      const n = nearestNode(pt, 0.6);
+      if (n && n[0] === S.chain[0] && n[1] === S.chain[1]) { S.chain = null; }
+      else {
+        const tgt = tubeTarget(S.chain, pt);
+        if (tgt && tryPlace({ type: tool, a: S.chain, b: tgt })) S.chain = null;
       }
     }
   } else if (tool === 'ladder') {
@@ -641,7 +680,7 @@ function updateDesignHover() {
     const start = S.chain || S.drag;
     if (start) {
       startRing.visible = true; startRing.position.set(start[0], start[1], Z_OUT + 0.02);
-      const tgt = tubeTarget(start, pt);
+      const tgt = (S.drag && S.dragEnd) || tubeTarget(start, pt);
       if (tgt) {
         const p = { type: tool, a: start, b: tgt };
         const err = validatePlacement(S.L, S.pieces, p);
@@ -726,7 +765,9 @@ function frameCamera(L, instant = false) {
   const target = new THREE.Vector3(0, Math.max(2.2, L.H * 0.46), 1.2);
   const aspect = window.innerWidth / window.innerHeight;
   const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), th = tv * aspect;
-  const dist = Math.max((L.W / 2 + 1.5) / th * 0.85, (L.H / 2 + 2.6) / tv) + 6.5;
+  const narrow = window.innerWidth < 760;
+  const dist = Math.max((L.W / 2 + 1.5) / th * (narrow ? 0.62 : 0.85), (L.H / 2 + 2.6) / tv) + (narrow ? 3 : 6.5);
+  if (narrow) target.x -= 0.7;
   const pos = new THREE.Vector3(dist * Math.sin(0.14), target.y + dist * 0.1, target.z + dist * Math.cos(0.14));
   S.camGoal = { target, pos, t: 0 };
   if (instant) { controls.target.copy(target); camera.position.copy(pos); S.camGoal = null; }
@@ -876,6 +917,7 @@ function stopTest() {
 $('buildBtn').onclick = startTest;
 $('stopBtn').onclick = stopTest;
 $('menuBtn').onclick = () => { sfx.click(); openSelect(); };
+$('undoCornerBtn').onclick = () => { if (S.mode === 'design') undo(); };
 $('briefBtn').onclick = () => { sfx.click(); openBrief(); };
 const syncSoundBtn = () => { $('soundBtn').querySelector('.wave').style.opacity = sfx.muted ? 0.15 : 1; };
 $('soundBtn').onclick = () => { sfx.toggle(); syncSoundBtn(); };
@@ -1289,6 +1331,7 @@ function frame(now) {
   const m = /job(\d+)/.exec(location.hash || '');
   if (window.__DEBUG_DESIGN) {
     const { level, pieces, test } = window.__DEBUG_DESIGN;
+    window.__proj = (x, y) => { const v = new THREE.Vector3(x, y, Z_OUT); root.localToWorld(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight]; };
     window.__S = S; window.__brk = () => breakables.filter(b => b.broken).map(b => b.kind); window.__fx = () => [ghosts.length, ragdolls.length, police.state, police.queue.length];
     loadLevel(level);
     if (pieces) { S.pieces = cleanPieces(pieces); afterEdit(); }
