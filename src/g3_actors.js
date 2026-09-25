@@ -7,7 +7,7 @@ const COL = {
   steel: new THREE.Color(0xbfc7cd), heavy: new THREE.Color(0xf0b90b),
   warm: new THREE.Color(0xffb020), hot: new THREE.Color(0xff2a10), sel: new THREE.Color(0xff4d3a),
   wood: new THREE.Color(0xffffff), woodHot: new THREE.Color(0xff5030),
-  alu: new THREE.Color(0xdfe4e8), lock: new THREE.Color(0xf3d40b),
+  trap: new THREE.Color(0xff9a8a), alu: new THREE.Color(0xdfe4e8), lock: new THREE.Color(0xf3d40b),
 };
 function stressColor(base, u, out) {
   if (u < 0.35) return out.copy(base);
@@ -77,7 +77,7 @@ class ScaffoldView {
   }
   // src: { nodes, members, boards, ties } from a Sim (live or static design sim)
   update(sim, opt = {}) {
-    const { stress = false, highlight = null, zoff = null, ghost = null, hiBoard = null } = opt;
+    const { stress = false, highlight = null, zoff = null, ghost = null, hiBoard = null, showTraps = false } = opt;
     const T = this.tubes, H = this.heavy, C = this.couplers, P = this.planks, D = this.decks;
     const pools = [T, H, C, P, D, this.plates, this.soles, this.rings, this.ghost, this.alu, this.locks, this.padlocks];
     for (const p of pools) p.begin();
@@ -124,6 +124,7 @@ class ScaffoldView {
       const ang = Math.atan2(dy, dx);
       let col = COL.wood;
       if (hiBoard && hiBoard.has(bd.piece)) col = COL.sel;
+      else if (showTraps && bd.type.id === 'trap') col = COL.trap;
       else if (stress) col = stressColor(COL.wood, bd.util || 0, _c);
       for (let i = 0; i < k; i++) {
         const z = Z_IN - 0.05 + w * (i + 0.5) + (nz(a) + nz(b)) / 2;
@@ -819,6 +820,7 @@ const officer = makePerson('police'); officer.visible = false; root.add(officer)
 const police = { active: false, t: 0, queue: [], state: 'idle', car: { x: -40 }, cop: null, chav: null, done: false };
 function startPolice(trapped, level) {
   if (police.active || !trapped.length) return;
+  for (const r of trapped) r.queued = true;
   Object.assign(police, { active: true, done: false, t: 0, queue: trapped.slice(), state: 'arrive', level, car: { x: -45 } });
   policeCar.visible = true;
   sfx.siren();

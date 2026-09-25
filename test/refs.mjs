@@ -1,8 +1,8 @@
-import { prepLevel, designCost } from '../src/engine.js';
+import { prepLevel, designCost, windowsAtRisk } from '../src/engine.js';
 import { LEVELS } from '../src/levels.js';
 import { D, run, checkValid } from './run.mjs';
 
-export const REFS = {
+const RAW = {
   1: () => D().std(2, 0, 2).std(5, 0, 2).led(2, 5, 2).br(2, 0, 4, 2).bd(2, 5, 2).lad(5, 0, 2).ps,
   2: () => D()
     .std(3, 0, 2).std(6, 0, 2).led(3, 6, 2).br(3, 0, 5, 2).std(8, 0, 2).led(6, 8, 2)
@@ -67,6 +67,12 @@ export const REFS = {
     .led(3, 5, 3).led(6, 8, 3).std(4, 0, 3, 'tube', 3).std(7, 0, 3, 'tube', 3)
     .bd(2, 4, 3, 'deck').bd(4, 5, 3).bd(5, 6, 3, 'deck').bd(6, 7, 3, 'deck').bd(7, 9, 3, 'deck').lad(3, 0, 3).lad(8, 0, 3).lad(6, 0, 3).lock(3).lock(8).lock(6).ps,
 };
+
+// every reference solution boards up the windows its heavy drops would smash
+export const REFS = Object.fromEntries(Object.entries(RAW).map(([id, f]) => [id, () => {
+  const L = prepLevel(LEVELS.find(l => l.id === +id));
+  return [...f(), ...[...windowsAtRisk(L)].map(i => ({ type: 'protect', a: [i, 0] }))];
+}]));
 
 if ((process.argv[1] || '').endsWith('refs.mjs')) {
   const only = process.argv[2] ? +process.argv[2] : null;

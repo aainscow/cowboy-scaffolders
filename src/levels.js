@@ -24,7 +24,7 @@ export const LEVELS = [
     house: { x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'red', door: { x: 1.5, w: 1, h: 2.1, color: '#7a2230' }, windows: [win(4, 0, 1.4), win(7, 0, 1.4), win(3.3, 1, 1.4), win(6.3, 1, 1.4)], roof: 'gable', chimney: 8 },
     zones: [{ x0: 3, x1: 8, y: 4, label: 'Sills' }],
     deliveries: [{ item: 'hod', zone: 0, x: 3.5 }, { item: 'bags', zone: 0, x: 6.5 }],
-    budget: 700, chavs: 1, startX: 12,
+    budget: 740, chavs: 1, startX: 12,
   },
   {
     id: 3, name: 'Pallet Up', client: 'Brick & Sons Builders',
@@ -34,7 +34,7 @@ export const LEVELS = [
     house: { x0: 0.5, x1: 8.5, floors: 2, eaves: 6, brick: 'yellow', door: { x: 6.5, w: 1, h: 2.1, color: '#1f3b73' }, windows: [win(2, 0, 1.2), win(2, 1, 1.2), win(4.5, 1, 1.2)], roof: 'gable', chimney: 1.5 },
     zones: [{ x0: 2, x1: 6, y: 3, label: 'Brickwork' }],
     deliveries: [{ item: 'pallet', zone: 0, x: 4 }, { item: 'hod', zone: 0, x: 2.5 }],
-    budget: 490, chavs: 2, startX: 11,
+    budget: 540, chavs: 2, startX: 11,
   },
   {
     id: 4, name: 'Mind the Door', client: 'Rev. Hollis, The Old Vicarage',
@@ -45,7 +45,7 @@ export const LEVELS = [
     forbidden: [{ x0: 4, y0: 0, x1: 7, y1: 3, kind: 'door', label: 'Keep clear' }],
     zones: [{ x0: 3, x1: 8, y: 4, label: 'Repointing' }],
     deliveries: [{ item: 'bags', zone: 0, x: 5.5 }, { item: 'tiles', zone: 0, x: 4 }],
-    budget: 840, chavs: 2, startX: 13,
+    budget: 880, chavs: 2, startX: 13,
   },
   {
     id: 5, name: 'Prize Roses', client: 'Major Thistlewood (ret.)',
@@ -56,7 +56,7 @@ export const LEVELS = [
     noBase: [[3, 6, 'roses']],
     zones: [{ x0: 3, x1: 7, y: 3, label: 'Render' }],
     deliveries: [{ item: 'hod', zone: 0, x: 4.5 }, { item: 'bags', zone: 0, x: 5.5 }],
-    budget: 940, chavs: 2, startX: 12,
+    budget: 980, chavs: 2, startX: 12,
   },
   {
     id: 6, name: 'Blustery Day', client: 'Hilltop Farmhouse',
@@ -89,7 +89,7 @@ export const LEVELS = [
     house: { x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'yellow', door: { x: 8, w: 1, h: 2.3, color: '#101010' }, windows: [win(1.2, 0, 1.2), win(4, 0, 1.4), win(1.2, 1, 1.2), win(4, 1, 1.4), win(7.5, 1, 1.2)], roof: 'gable', chimney: 1.5 },
     zones: [{ x0: 1, x1: 8, y: 3, label: 'Balcony' }],
     deliveries: [{ item: 'bags', zone: 0, x: 2.5 }, { item: 'mixer', zone: 0, x: 5 }, { item: 'hod', zone: 0, x: 7 }],
-    budget: 860, chavs: 3, startX: 12,
+    budget: 940, chavs: 3, startX: 12,
   },
   {
     id: 9, name: 'Bath Time', client: 'Mr & Mrs Vasquez',
@@ -100,7 +100,7 @@ export const LEVELS = [
     zones: [{ x0: 2, x1: 8, y: 4, label: 'Bathroom' }],
     deliveries: [{ item: 'bath', zone: 0, x: 4 }, { item: 'mixer', zone: 0, x: 6.5 }, { item: 'bags', zone: 0, x: 3 }],
     deck: true,
-    budget: 910, chavs: 3, startX: 12,
+    budget: 990, chavs: 3, startX: 12,
   },
   {
     id: 10, name: 'Piano Removals', client: 'Madame Duval, Music Teacher',
@@ -112,7 +112,7 @@ export const LEVELS = [
     zones: [{ x0: 3, x1: 8, y: 6, label: 'Studio' }],
     deliveries: [{ item: 'piano', zone: 0, x: 4 }, { item: 'grand', zone: 0, x: 6.5 }],
     wind: 6, gust: 8, deck: true, heavy: true, maxTies: 4,
-    budget: 1760, chavs: 3, startX: 13,
+    budget: 1840, chavs: 3, startX: 13,
   },
   {
     id: 11, name: 'Chimney Stack', client: 'Tall House, Windy Ridge',
@@ -134,6 +134,6 @@ export const LEVELS = [
     zones: [{ x0: 2, x1: 9, y: 3, label: 'Terrace' }],
     deliveries: [{ item: 'safe', zone: 0, x: 3 }, { item: 'dumpy', zone: 0, x: 8 }, { item: 'statue', zone: 0, x: 5.5 }],
     wind: 4, gust: 6, deck: true, heavy: true,
-    budget: 1410, chavs: 4, startX: 13,
+    budget: 1520, chavs: 4, startX: 13,
   },
 ];

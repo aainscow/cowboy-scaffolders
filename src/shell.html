@@ -78,6 +78,8 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
 #docket .checks li.ok { color: var(--text); }
 #docket .checks li::before { content: ''; width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); flex: none; box-sizing: border-box; }
 #docket .checks li.ok::before { background: var(--safe); border-color: var(--safe); }
+#docket .checks li.info { color: var(--text); }
+#docket .checks li.info::before { border-radius: 2px; border-color: var(--hivis-yellow); background: transparent; width: 10px; height: 10px; transform: rotate(45deg); }
 
 #tools { left: 12px; top: 50%; transform: translateY(-50%); padding: 6px; display: flex; flex-direction: column; gap: 4px; max-height: calc(100vh - 200px); overflow-y: auto; }
 .tool { display: grid; grid-template-columns: 34px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; width: 150px; padding: 6px 8px; border-radius: 7px; border: 1px solid transparent; background: transparent; text-align: left; }
@@ -198,6 +200,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
 #orderPanel li button:hover { background: rgba(255,255,255,.2); }
 .lbl.order.done { background: var(--safe); color: #fff; }
 .lbl.shout.sued { color: #ff3b30; font-size: 34px; }
+.lbl.risk { background: rgba(243, 212, 11, .92); color: #161b21; padding: 2px 7px; border-radius: 3px; font-size: 11.5px; }
 .lbl.shout.bonus { color: var(--hivis-yellow); font-size: 34px; }
 .tag .fields .v.bonus { color: #b8860b; }
 .sheet .tally { float: right; margin-top: -30px; font-family: var(--cond); font-weight: 700; color: var(--hivis-yellow); text-transform: uppercase; letter-spacing: .08em; font-size: 14px; }

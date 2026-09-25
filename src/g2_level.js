@@ -56,12 +56,48 @@ function breakObject(b, h) {
 }
 function checkBreakables(hitters) {
   for (const b of breakables) {
-    if (b.broken) continue;
+    if (b.broken || b.protected) continue;
     for (const h of hitters) {
       if (Math.abs(h.x - b.x) < b.rx && Math.abs(h.y - b.y) < b.ry && Math.abs(h.z - b.z) < b.rz) { breakObject(b, h); break; }
     }
   }
 }
+// A brick through the glass: the pane shatters, the frame stays put.
+function smashGlass(b) {
+  if (!b || b.broken || b.protected || !b.glass || !b.glass.parent) return false;
+  const gp = new THREE.Vector3(); b.glass.getWorldPosition(gp); root.worldToLocal(gp);
+  b.glass.parent.remove(b.glass);
+  const shardGeo = new THREE.BufferGeometry();
+  shardGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0.16, 0.03, 0, 0.05, 0.2, 0], 3));
+  shardGeo.computeVertexNormals();
+  const sm = M.glass.clone(); sm.side = THREE.DoubleSide;
+  const r = () => Math.random() - 0.5;
+  for (let i = 0; i < 12; i++) {
+    const m = new THREE.Mesh(shardGeo, sm);
+    m.position.set(gp.x + r() * b.rx, gp.y + r() * b.ry, 0.1); m.scale.setScalar(0.5 + Math.random());
+    root.add(m);
+    debris.push({ mesh: m, vx: r() * 1.5, vy: Math.random(), vz: 0.5 + Math.random() * 1.5, w: new THREE.Vector3(r() * 12, r() * 12, r() * 12), level: currentLevel(), keep: true, lift: 0.01, quiet: true });
+  }
+  b.glassBroken = true; sceneDirty = true;
+  sfx.glass();
+  return true;
+}
+// Plywood over the windows the player has boarded up.
+const plyMat = new THREE.MeshStandardMaterial({ color: 0xd9b27a, roughness: 0.85, map: woodTex });
+let boardUps = [];
+function syncBoardUps(L, pieces) {
+  for (const m of boardUps) m.parent && m.parent.remove(m);
+  boardUps = [];
+  const set = new Set(pieces.filter(p => p.type === 'protect').map(p => p.a[0]));
+  for (const b of breakables) if (b.kind === 'window') b.protected = set.has(b.wi);
+  (L.house.windows || []).forEach((w, i) => {
+    if (!set.has(i)) return;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w.w + 0.26, w.h + 0.26, 0.025), plyMat);
+    m.position.set(w.x + w.w / 2, w.y + w.h / 2, 0.13); m.castShadow = true; m.receiveShadow = true;
+    levelGroup.add(m); boardUps.push(m);
+  });
+}
+function windowBreakable(i) { return breakables.find(b => b.kind === 'window' && b.wi === i); }
 function wallChunks(x, y) {
   const bm = new THREE.MeshStandardMaterial({ color: 0x9c4a33, roughness: 0.9 });
   for (let i = 0; i < 6; i++) {
@@ -165,12 +201,12 @@ function buildHouse(parent, h, opts = {}) {
   // plinth band
   box(w, 0.3, 0.04, M.stoneWall, cx, 0.15, 0.02, g, false);
   // windows
-  for (const wd of h.windows || []) addWindow(g, wd, h.brick, opts.main);
+  (h.windows || []).forEach((wd, i) => addWindow(g, wd, h.brick, opts.main, i));
   if (h.door) addDoor(g, h.door);
   return g;
 }
 
-function addWindow(g, wd, brick, reg) {
+function addWindow(g, wd, brick, reg, wi) {
   const { x, y, w, h } = wd;
   const cx = x + w / 2, cy = y + h / 2;
   // interior glow + curtains behind glass
@@ -189,7 +225,7 @@ function addWindow(g, wd, brick, reg) {
   parts.push(box(w, 0.045, 0.06, M.frame, cx, cy + 0.05, 0.04, g, false));
   parts.push(box(0.04, h, 0.06, M.frame, cx, cy, 0.04, g, false));
   parts.push(box(w + 0.35, 0.07, 0.2, M.sill, cx, y - t - 0.035, 0.08, g));
-  if (reg) makeBreakable('window', parts, g, { glass, rz: 1.3 });
+  if (reg) makeBreakable('window', parts, g, { glass, rz: 1.3, wi });
   if (brick !== 'render') box(w + 0.3, 0.16, 0.03, M.sill, cx, y + h + t + 0.08, 0.015, g, false);
 }
 

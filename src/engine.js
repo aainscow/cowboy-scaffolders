@@ -12,6 +12,7 @@ export const MATS = {
 export const BOARDS = {
   board: { id: 'board', name: 'Timber boards', kgPerM: 26, cap: 360,  cost: 18 },
   deck:  { id: 'deck',  name: 'Steel deck',    kgPerM: 42, cap: 1500, cost: 50 },
+  trap:  { id: 'trap',  name: 'Trap board',    kgPerM: 14, cap: 30,   cost: 12 }, // looks real, isn't
 };
 export const TIE = { K: 4e6, T: 5000, cost: 40 };
 export const COUPLER = { k: 1000, M: 480 };
@@ -19,6 +20,30 @@ export const BASEPLATE = { k: 2500, M: 520, cost: 6 };
 export const LADDER = { cost: 8, kgPerM: 9, maxLen: 4 };
 export const LOCK = { cost: 25 };
 export const TAG_COST = 150;
+export const TRAP_REWARD = 100;      // police reward per chav handed over
+export const SAFE_FALL = 3.5;        // a chav survives a drop up to this (metres)
+export const GLAZIER = 120;          // per broken window
+export const BOARDUP = { cost: 35 }; // plywood over a window
+export const WINDOW_BREAK_KG = 100;  // dumping this much in front of a window puts a brick through it
+
+// Windows a delivery will smash unless they're boarded up: heavy drops landing right in front of them.
+export function windowsAtRisk(level) {
+  const out = new Set();
+  const ws = level.house.windows || [];
+  for (const d of level.deliveries) {
+    const it = ITEMS[d.item], z = level.zones[d.zone];
+    if (it.mass < WINDOW_BREAK_KG) continue;
+    ws.forEach((w, i) => {
+      if (w.x < d.x + it.w / 2 + 0.3 && w.x + w.w > d.x - it.w / 2 - 0.3 && w.y >= z.y - 0.5 && w.y <= z.y + 1.8) out.add(i);
+    });
+  }
+  return out;
+}
+export function windowInFront(level, x, y, pad = 0.3) {
+  const ws = level.house.windows || [];
+  const i = ws.findIndex(w => x > w.x - pad && x < w.x + w.w + pad && w.y >= y - 0.5 && w.y <= y + 1.8);
+  return i;
+}
 export const CHAV_MASS = 65;
 export const BUILDER_MASS = 90;
 export const MAX_LEN = 3.2;
@@ -70,10 +95,11 @@ function gcd(a, b) { a = Math.abs(a); b = Math.abs(b); while (b) { [a, b] = [b, 
 
 export function pieceCost(p) {
   if (p.type === 'tube' || p.type === 'heavy') return MATS[p.type].cost * Math.hypot(p.b[0] - p.a[0], p.b[1] - p.a[1]) + baseCostFor(p);
-  if (p.type === 'board' || p.type === 'deck') return BOARDS[p.type].cost * Math.abs(p.b[0] - p.a[0]);
+  if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') return BOARDS[p.type].cost * Math.abs(p.b[0] - p.a[0]);
   if (p.type === 'tie') return TIE.cost;
   if (p.type === 'ladder') return LADDER.cost * Math.abs(p.b[1] - p.a[1]);
   if (p.type === 'lock') return LOCK.cost;
+  if (p.type === 'protect') return BOARDUP.cost;
   return 0;
 }
 function baseCostFor(p) { return 0; }
@@ -191,7 +217,7 @@ export class Sim {
       this._updateExposure();
       return mids;
     }
-    if (p.type === 'board' || p.type === 'deck') {
+    if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') {
       const bt = BOARDS[p.type];
       const x0 = Math.min(p.a[0], p.b[0]), x1 = Math.max(p.a[0], p.b[0]), y = p.a[1];
       const made = [];
@@ -522,7 +548,7 @@ export class Sim {
 
   // Find a climbing/walking route from the ground to a board node.
   // Route up ladders and along boards. Path: [{ground foot}, {node, via}, ...]
-  findRoute(startX, targetNodes, dropX = null, { allowLocked = true } = {}) {
+  findRoute(startX, targetNodes, dropX = null, { allowLocked = true, traps = 'walk' } = {}) {
     const nodes = this.nodes;
     const adj = new Map();
     const add = (a, b, w, kind, ref) => {
@@ -531,7 +557,11 @@ export class Sim {
       adj.get(a).push({ to: b, w, kind, ref });
       adj.get(b).push({ to: a, w, kind, ref });
     };
-    for (const b of this.boards) if (!b.broken) add(b.a, b.b, 1, 'walk', b.id);
+    for (const b of this.boards) {
+      if (b.broken) continue;
+      if (b.type.id === 'trap' && traps === 'exclude') continue;
+      add(b.a, b.b, b.type.id === 'trap' && traps === 'avoid' ? 500 : 1, 'walk', b.id);
+    }
     const dist = new Map(), prev = new Map();
     const pq = [];
     for (const l of this.ladders) {
@@ -642,7 +672,7 @@ export function validatePlacement(level, pieces, p) {
       const pts = splitTube(q.a, q.b);
       pts.forEach(pt => nodeSet.add(pt.join(',')));
       for (let i = 0; i < pts.length - 1; i++) segSet.add(segKey(pts[i], pts[i + 1]));
-    } else if (q.type === 'board' || q.type === 'deck') {
+    } else if (q.type === 'board' || q.type === 'deck' || q.type === 'trap') {
       for (let x = Math.min(q.a[0], q.b[0]); x < Math.max(q.a[0], q.b[0]); x++) boardSet.add(x + ',' + q.a[1]);
     } else if (q.type === 'tie') tieSet.add(q.a.join(','));
   }
@@ -666,7 +696,7 @@ export function validatePlacement(level, pieces, p) {
     if (!touches) return 'Must connect to the ground or existing scaffold';
     return null;
   }
-  if (p.type === 'board' || p.type === 'deck') {
+  if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') {
     const x0 = Math.min(p.a[0], p.b[0]), x1 = Math.max(p.a[0], p.b[0]);
     if (p.a[1] !== p.b[1] || x1 - x0 < 1) return 'Boards lie on horizontal tubes';
     for (let x = x0; x < x1; x++) {
@@ -696,6 +726,12 @@ export function validatePlacement(level, pieces, p) {
     if (lockSet.has(p.a.join(','))) return 'Already locked';
     return null;
   }
+  if (p.type === 'protect') {
+    const w = (L.house.windows || [])[p.a[0]];
+    if (!w) return 'Click a window to board it up';
+    if (pieces.some(q => q.type === 'protect' && q.a[0] === p.a[0])) return 'Already boarded up';
+    return null;
+  }
   if (p.type === 'tie') {
     if (!nodeSet.has(p.a.join(','))) return 'Ties attach to a scaffold joint';
     if (!L.canTie(p.a[0], p.a[1])) return 'Nothing solid to tie into there';
@@ -713,11 +749,11 @@ export function checkRequirements(level, pieces) {
   for (const p of pieces) sim.addPiece({ ...p });
   const zones = level.zones.map(z => {
     let covered = 0;
-    for (let x = z.x0; x < z.x1; x++) if (sim.boardUnder(x + 0.5, z.y)) covered++;
+    for (let x = z.x0; x < z.x1; x++) { const b = sim.boardUnder(x + 0.5, z.y); if (b && b.type.id !== 'trap') covered++; }
     const need = z.x1 - z.x0;
     const zNodes = [];
     for (const b of sim.boardsAtLevel(z.y)) if (b.x1 > z.x0 && b.x0 < z.x1) zNodes.push(b.a, b.b);
-    const route = zNodes.length ? sim.findRoute(level.startX ?? level.W + 2, zNodes) : null;
+    const route = zNodes.length ? sim.findRoute(level.startX ?? level.W + 2, zNodes, null, { traps: 'exclude' }) : null;
     return { covered, need, boarded: covered >= need, reachable: !!route };
   });
   return { zones, ok: zones.every(z => z.boarded && z.reachable) };
@@ -770,8 +806,8 @@ export class Trial {
         this._fall(p, n ? n.vx : 0, n ? n.vy : 0);
       }
     }
-    const trapped = this.chavs.filter(c => c.state === 'falling').length;
-    this.result = { ok: false, reason, where, trapped };
+    const trapped = this.chavs.filter(c => c.state === 'falling' && c.tangled).length + (this.trappedCount || 0);
+    this.result = { ok: false, reason, where, trapped, sued: !!this.sued };
     this.result.daveDown = this.builder.state === 'falling';
   }
   _nearestNode(x, y) {
@@ -808,10 +844,10 @@ export class Trial {
     } else if (this.phase === 'chavs') {
       this.chavT += dt;
       this._chavsUpdate(dt);
-      if (this.chavs.every(c => c.state === 'gone') || this.chavT > 60) { this.phase = 'hold'; this.pieceT = 0; this.builder.state = 'waving'; }
+      if (this.chavs.every(c => c.state === 'gone' || c.state === 'flat') || this.chavT > 60) { this.phase = 'hold'; this.pieceT = 0; this.builder.state = 'waving'; }
     } else if (this.phase === 'hold') {
       this.pieceT += dt;
-      if (this.pieceT > 2.5 && !this.result) { this.phase = 'done'; this.result = { ok: true, tags: this.tags.length }; }
+      if (this.pieceT > 2.5 && !this.result) { this.phase = 'done'; this.result = { ok: true, tags: this.tags.length, trapped: this.trappedCount || 0 }; }
     } else if (this.phase === 'failing') {
       this.failT += dt;
       if (this.failT > 4.5) this.phase = 'done';
@@ -824,7 +860,10 @@ export class Trial {
       const md = sim.maxDisp();
       this.maxDispSeen = Math.max(this.maxDispSeen, md.d);
       if (md.d > COLLAPSE_DISP) this.fail(this.phase === 'build' ? `Collapsed during construction (piece ${this.idx + 1} of ${this.pieces.length})` : this.phase === 'chavs' ? 'The chavs brought it down' : 'The scaffold collapsed under load', md.node);
-      for (const ev of sim.events) if (ev.type === 'board' && ev.reason === 'overload') this.fail('A board snapped under the weight', ev);
+      for (const ev of sim.events) if (ev.type === 'board' && ev.reason === 'overload') {
+        if (sim.boards[ev.id].type.id === 'trap') { this.events.push({ type: 'trapSprung', ev }); continue; }
+        this.fail('A board snapped under the weight', ev);
+      }
     }
     sim.events.length = 0;
   }
@@ -836,14 +875,25 @@ export class Trial {
       if (p.state === 'falling') {
         p.vy -= GRAV * dt; p.y += p.vy * dt; p.x += p.vx * dt;
         const g = this.level.groundAt(p.x);
-        if (p.y <= g) { p.y = g; p.state = 'flat'; this.events.push({ type: 'splat', who: p }); }
+        if (p.y <= g) {
+          p.y = g; p.state = 'flat';
+          const h = (p.fallFrom ?? g) - g;
+          this.events.push({ type: 'splat', who: p, h });
+          if (p.who === 'chav' && !p.tangled) {
+            if (h > SAFE_FALL) { p.dead = true; this.sued = true; this.fail(`SUED! A chav fell ${h.toFixed(1)} m through your scaffold.`); if (this.result) this.result.sued = true; }
+            else { p.trapped = true; this.trappedCount = (this.trappedCount || 0) + 1; this.events.push({ type: 'nicked', who: p }); }
+          }
+        }
         continue;
       }
       if (p.state === 'flat' || p.state === 'gone') continue;
       if (this.phase !== 'failing' && this.phase !== 'done' && this._unsupported(p)) {
-        p.tangled = true;
+        const bd = p.onBoard >= 0 ? this.sim.boards[p.onBoard] : null;
+        const trap = bd && bd.type.id === 'trap';
+        if (!trap) p.tangled = true;
         this._fall(p, 0, 0);
-        if (p === this.builder) this.fail('Dave fell off!'); else this.fail('A chav fell off');
+        if (p === this.builder) this.fail(trap ? 'Dave fell through a trap board! The only way up went over it.' : 'Dave fell off!');
+        else if (!trap) this.fail('A chav fell off');
         continue;
       }
       if (this.phase === 'failing') this._cling(p);
@@ -857,6 +907,7 @@ export class Trial {
     return false;
   }
   _fall(p, vx, vy) {
+    p.fallFrom = p.y;
     p.state = 'falling'; p.vx = vx; p.vy = vy; p.onMember = -1; p.onBoard = -1; p.onLadder = -1;
     this._setLoad(p, null);
     if (p.carrying) { this._dropItem(p.carrying, p.x, p.y + 0.8, 0); p.carrying.vr = (this.rng() - 0.5) * 4; p.carrying = null; }
@@ -950,7 +1001,7 @@ export class Trial {
     b.visible = true; b.carrying = item; b.x = this.startX; b.y = L.groundAt(this.startX); b.mode = 'ground';
     const cands = [];
     for (const bd of this.sim.boardsAtLevel(z.y)) if (bd.x1 > z.x0 - 0.01 && bd.x0 < z.x1 + 0.01) cands.push(bd.a, bd.b);
-    const route = this.sim.findRoute(this.startX, cands, d.x);
+    const route = this.sim.findRoute(this.startX, cands, d.x, { traps: 'avoid' });
     if (!route) { this.fail("Dave can't get up to the platform"); return; }
     b.route = route; b.routeI = 0; b.segT = 0; b.returning = false; b.u = null;
     b.state = 'toBase';

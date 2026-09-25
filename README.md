@@ -10,8 +10,9 @@ Big Terry's rule: *as long as it doesn't fall down, it's fine.*
 - **Design** the scaffold on the front of a house: tubes (standards, ledgers, braces), timber boards or steel deck, wall ties, ladders and ladder locks. Everything costs money; whatever you don't spend of the client's quote is profit.
 - **It has to stand while it goes up.** The crew erects the pieces one at a time in *your* build order, and every half-built stage is physically simulated. Use the **Build order** tool or the order list to change the sequence.
 - **Then Dave loads it.** He climbs the ladders carrying hods of bricks, pallets, pianos, a safe, a tonne of sand and a bronze elephant, and dumps them on the platform.
-- **Then the chavs arrive.** They swing on low tubes and climb any ladder that isn't locked to spray-paint the house (£150 clean-up per tag). Trap one in the wreckage and the police come and take them away: bonus point.
-- Collapses take the house with them: windows, gutters, pots and gnomes. Dave ragdolls, gets tangled in the tubes, and ascends.
+- **Then the chavs arrive.** They swing on low tubes and climb any unlocked ladder to spray-paint the house (£150 clean-up per tag). Locks are optional: lay **trap boards** instead. A chav who drops 3.5 m or less through one lies there dazed until the police cart them off, and pays you a £100 reward. Drop one further and you get sued. Dave avoids trap boards when there's another way up.
+- **Windows cost money.** Dumping 100 kg or more in front of a window puts a brick through it (£120 glazier). Board it up first for £35, or gamble. Windows in the firing line are marked in design mode.
+- Collapses take the house with them: windows, gutters, pots and gnomes. Dave gets tangled in the tubes and ascends.
 
 12 jobs, with tighter quotes, heavier loads and more chavs as you go. Stars for coming in well under the quote.
 

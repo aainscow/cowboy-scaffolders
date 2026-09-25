@@ -217,6 +217,8 @@ const ICON = {
   erase: '<svg viewBox="0 0 34 34" fill="none" stroke="#ff8a7a" stroke-width="3" stroke-linecap="round"><path d="M10 10l14 14M24 10L10 24"/></svg>',
   ladder: '<svg viewBox="0 0 34 34" fill="none" stroke="#dfe4e8" stroke-width="2.4" stroke-linecap="round"><path d="M11 3v28M23 3v28M11 8h12M11 14h12M11 20h12M11 26h12"/></svg>',
   lock: '<svg viewBox="0 0 34 34"><path d="M11 3v28M23 3v28" stroke="#dfe4e8" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="15" width="18" height="15" rx="1.5" fill="#f3d40b"/><path d="M8 20l6-5M8 27l12-12M14 30l12-10" stroke="#161b21" stroke-width="2"/><rect x="21" y="9" width="7" height="6" rx="1" fill="#d4a843"/><path d="M22.5 9V7a2 2 0 0 1 4 0v2" stroke="#d4a843" stroke-width="1.6" fill="none"/></svg>',
+  trap: '<svg viewBox="0 0 34 34"><rect x="3" y="12" width="28" height="10" rx="1" fill="#c99a58"/><path d="M3 15h28M3 18.5h28" stroke="#8a6230" stroke-width=".8"/><path d="M15 12l3 4-3 2 4 4" stroke="#d7312a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  protect: '<svg viewBox="0 0 34 34"><rect x="6" y="5" width="22" height="24" fill="#2a3440" stroke="#f6f5f0" stroke-width="2"/><rect x="4" y="8" width="26" height="18" rx="1" fill="#d9b27a" transform="rotate(-8 17 17)"/><g fill="#6b4e2e"><circle cx="8" cy="12" r="1.2"/><circle cx="27" cy="9" r="1.2"/><circle cx="8" cy="26" r="1.2"/><circle cx="28" cy="23" r="1.2"/></g></svg>',
   order: '<svg viewBox="0 0 34 34"><circle cx="9" cy="9" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="9" y="12.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">1</text><circle cx="25" cy="25" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="25" y="28.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">2</text><path d="M13 13l8 8" stroke="#f3d40b" stroke-width="2.2" stroke-linecap="round"/><path d="M21 16v5h-5" stroke="#f3d40b" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
 };
 const TOOLS = [
@@ -226,6 +228,8 @@ const TOOLS = [
   { id: 'deck', name: 'Steel deck', price: `£${BOARDS.deck.cost}/m · ${BOARDS.deck.cap} kg`, key: '4', req: 'deck' },
   { id: 'ladder', name: 'Ladder', price: `£${LADDER.cost}/m · up to ${LADDER.maxLen} m`, key: '5' },
   { id: 'lock', name: 'Ladder lock', price: `£${LOCK.cost} · keeps chavs off`, key: '6', req: 'chavs' },
+  { id: 'trap', name: 'Trap board', price: `£${BOARDS.trap.cost}/m · gives way under anyone`, key: 't', req: 'chavs' },
+  { id: 'protect', name: 'Board up', price: `£${BOARDUP.cost} a window · glazier £${GLAZIER}`, key: '0' },
   { id: 'tie', name: 'Wall tie', price: `£${TIE.cost} each`, key: '7' },
   { id: 'order', name: 'Build order', price: 'Click pieces in order', key: '8' },
   { id: 'erase', name: 'Remove', price: 'Full refund', key: '9' },
@@ -279,14 +283,18 @@ const TERRY = [
   "It's windy up there. That's the chimney's problem, not mine.",
   "An elephant? On a scaffold? As long as it doesn't fall down, it's fine.",
 ];
-const PNAME = { tube: 'Tube', heavy: 'Heavy tube', board: 'Boards', deck: 'Steel deck', tie: 'Wall tie', ladder: 'Ladder', lock: 'Ladder lock' };
+function windowAt(pt) {
+  const ws = S.L.house.windows || [];
+  return ws.findIndex(w => pt.x > w.x - 0.25 && pt.x < w.x + w.w + 0.25 && pt.y > w.y - 0.25 && pt.y < w.y + w.h + 0.25);
+}
+const PNAME = { trap: 'Trap board', protect: 'Window board', tube: 'Tube', heavy: 'Heavy tube', board: 'Boards', deck: 'Steel deck', tie: 'Wall tie', ladder: 'Ladder', lock: 'Ladder lock' };
 function pieceDesc(p) {
   if (p.type === 'tube' || p.type === 'heavy') {
     const dx = p.b[0] - p.a[0], dy = p.b[1] - p.a[1];
     const kind = dx === 0 ? 'upright' : dy === 0 ? 'ledger' : 'brace';
     return `${PNAME[p.type]} · ${kind} ${Math.hypot(dx, dy).toFixed(1)} m`;
   }
-  if (p.type === 'board' || p.type === 'deck') return `${PNAME[p.type]} at ${p.a[1]} m`;
+  if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') return `${PNAME[p.type]} at ${p.a[1]} m`;
   if (p.type === 'ladder') return `Ladder ${p.a[1]}→${p.b[1]} m`;
   return PNAME[p.type];
 }
@@ -338,6 +346,8 @@ function updateHelp() {
     deck: '<b>Click or drag</b> along a horizontal tube to lay steel deck. Holds 1500 kg.',
     tie: '<b>Click</b> a joint next to solid wall (blue dots) to tie it in. Ties stop sway but carry no weight.',
     ladder: '<b>Click</b> the foot (ground or a boarded platform), then the top. The top must land on boards. Dave only climbs ladders.',
+    trap: `<b>Click or drag</b> along a tube to lay a fake board. It looks real but gives way under anyone. A chav who drops ${SAFE_FALL} m or less lies there dazed and the police pay ${fmt(TRAP_REWARD)} for them. Any higher and you get sued. Dave avoids trap boards if there's another way up.`,
+    protect: `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${GLAZIER} glazier). Windows marked ⚠ are in the firing line.`,
     lock: '<b>Click</b> any ladder to lock it. Chavs can\'t climb locked ladders, and Dave has the key.',
     order: '<b>Click pieces in the order you want them put up</b>, starting from #1. Anything you don\'t click keeps its place after. Use the order list to fine-tune.',
     erase: '<b>Click</b> a tube, board, ladder, lock or tie to remove it.',
@@ -367,9 +377,21 @@ function afterEdit() {
   for (const p of S.pieces) S.designSim.addPiece({ ...p });
   save.d.designs[L.id] = S.pieces;
   save.write();
+  syncBoardUps(L, S.pieces);
+  refreshRiskLabels();
   refreshDocket();
   refreshOrderLabels();
   renderOrderPanel();
+}
+function refreshRiskLabels() {
+  clearLabels('risk');
+  if (S.mode !== 'design') return;
+  const prot = new Set(S.pieces.filter(p => p.type === 'protect').map(p => p.a[0]));
+  for (const i of S.risk || []) {
+    if (prot.has(i)) continue;
+    const w = S.L.house.windows[i];
+    addLabel('risk', `⚠ Glass at risk · £${GLAZIER}`, w.x + w.w / 2, w.y + w.h / 2, 0.2, 'risk');
+  }
 }
 function refreshOrderLabels() {
   clearLabels('order');
@@ -378,7 +400,8 @@ function refreshOrderLabels() {
     let x, y;
     if (p.type === 'ladder') { x = p.a[0] + LAD_OFF; y = (p.a[1] + p.b[1]) / 2; }
     else if (p.type === 'lock') { x = p.a[0] + LAD_OFF; y = p.a[1] + 0.6; }
-    else if (p.b) { x = (p.a[0] + p.b[0]) / 2; y = (p.a[1] + p.b[1]) / 2 + (p.type === 'board' || p.type === 'deck' ? 0.25 : 0); }
+    else if (p.type === 'protect') { const w = S.L.house.windows[p.a[0]]; x = w.x + w.w / 2; y = w.y + w.h / 2; }
+    else if (p.b) { x = (p.a[0] + p.b[0]) / 2; y = (p.a[1] + p.b[1]) / 2 + (p.type === 'board' || p.type === 'deck' || p.type === 'trap' ? 0.25 : 0); }
     else { x = p.a[0] + 0.25; y = p.a[1] - 0.25; }
     const l = addLabel('order' + (S.tool === 'order' && i < S.seq ? ' done' : ''), String(i + 1), x, y, Z_OUT + 0.1, 'order');
     l.idx = i;
@@ -409,9 +432,13 @@ function refreshDocket() {
     items.push([r.reachable, r.reachable ? 'Dave has a ladder up to it' : 'Dave needs ladders up to the platform']);
     if (zz._label) zz._label.el.classList.toggle('done', r.boarded);
   });
-  if (L.chavs) items.push([locks >= groundLadders.length && groundLadders.length > 0, locks >= groundLadders.length ? 'Ground ladders locked' : `${groundLadders.length - locks} ladder${groundLadders.length - locks > 1 ? 's' : ''} unlocked: chavs will get up`]);
+  const unlocked = groundLadders.length - Math.min(locks, groundLadders.length);
+  const traps = S.pieces.filter(p => p.type === 'trap').length;
+  if (L.chavs) items.push(['info', unlocked ? `${unlocked} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : 'Ladders locked: chavs stay on the ground']);
+  const unprot = [...(S.risk || [])].filter(i => !S.pieces.some(p => p.type === 'protect' && p.a[0] === i)).length;
+  if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? 'Windows in the firing line boarded' : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${GLAZIER} each if smashed`]);
   items.push([frac <= 1, frac <= 1 ? `Under the quote by ${fmt(L.budget - cost)}` : `Over the quote by ${fmt(cost - L.budget)}`]);
-  $('checks').innerHTML = items.map(([ok, t]) => `<li class="${ok ? 'ok' : ''}">${t}</li>`).join('');
+  $('checks').innerHTML = items.map(([ok, t]) => `<li class="${ok === 'info' ? 'info' : ok ? 'ok' : ''}">${t}</li>`).join('');
   const b = $('buildBtn');
   b.disabled = !S.pieces.length;
   b.textContent = req.ok ? 'Build it' : 'Build anyway';
@@ -469,9 +496,10 @@ function pieceAt(pt) {
   S.pieces.forEach((p, i) => {
     let d;
     if (p.type === 'tie') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.12;
+    else if (p.type === 'protect') { const w = S.L.house.windows[p.a[0]]; d = w ? Math.hypot(pt.x - w.x - w.w / 2, pt.y - w.y - w.h / 2) - 0.45 : 9; }
     else if (p.type === 'lock') d = Math.hypot(pt.x - p.a[0] - LAD_OFF, pt.y - p.a[1] - 0.75) - 0.35;
     else if (p.type === 'ladder') d = segDist(pt.x, pt.y, p.a[0] + LAD_OFF, p.a[1], p.b[0] + LAD_OFF, p.b[1] + 1) - 0.1;
-    else if (p.type === 'board' || p.type === 'deck') d = segDist(pt.x, pt.y, p.a[0] + 0.1, p.a[1] + 0.14, p.b[0] - 0.1, p.b[1] + 0.14) - 0.05;
+    else if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') d = segDist(pt.x, pt.y, p.a[0] + 0.1, p.a[1] + 0.14, p.b[0] - 0.1, p.b[1] + 0.14) - 0.05;
     else d = segDist(pt.x, pt.y, p.a[0], p.a[1], p.b[0], p.b[1]);
     if (d < bd) { bd = d; best = i; }
   });
@@ -508,7 +536,7 @@ function tryPlace(p) {
   pushUndo();
   S.pieces.push(p);
   afterEdit();
-  if (p.type === 'board' || p.type === 'deck') sfx.thunk(); else sfx.clank(0.7);
+  if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') sfx.thunk(); else sfx.clank(0.7);
   return true;
 }
 let toastT = null;
@@ -541,7 +569,7 @@ cvs.addEventListener('pointerdown', (ev) => {
       if (n && ladderFootOk(n)) S.drag = n;
       else if (n) toast('Stand ladders on the ground or on a boarded platform');
     }
-  } else if (S.tool === 'board' || S.tool === 'deck') {
+  } else if (S.tool === 'board' || S.tool === 'deck' || S.tool === 'trap') {
     const seg = boardSegAt(pt);
     S.paint = { y: seg ? seg.a[1] : null, done: new Set() };
     if (seg) { S.paint.done.add(seg.a[0]); tryPlace(seg); }
@@ -646,6 +674,9 @@ window.addEventListener('pointerup', (ev) => {
         refreshOrderLabels();
       }
     }
+  } else if (tool === 'protect' && moved < 8) {
+    const i = windowAt(pt);
+    if (i >= 0) tryPlace({ type: 'protect', a: [i, 0] }); else toast('Click a window to board it up');
   } else if (tool === 'tie' && moved < 8) {
     const n = nearestNode(pt);
     if (n) tryPlace({ type: 'tie', a: n });
@@ -696,7 +727,7 @@ function updateDesignHover() {
       const n = nearestNode(pt);
       if (n) { hoverRing.visible = true; hoverRing.position.set(n[0], n[1], Z_OUT + 0.02); hoverRing.material.color.set(isStartable(n) ? 0xf3d40b : 0x777777); }
     }
-  } else if (tool === 'board' || tool === 'deck') {
+  } else if (tool === 'board' || tool === 'deck' || tool === 'trap') {
     const seg = boardSegAt(pt);
     if (seg) {
       const err = validatePlacement(S.L, S.pieces, seg);
@@ -735,6 +766,13 @@ function updateDesignHover() {
       const err = validatePlacement(S.L, S.pieces, { type: 'lock', a: l.a });
       hiPieces = new Set([S.pieces.indexOf(l)]);
       setTip(err || `Lock this ladder · ${fmt(LOCK.cost)}`, !!err, pt.x, pt.y);
+    }
+  } else if (tool === 'protect') {
+    const i = windowAt(pt);
+    if (i >= 0) {
+      const w = S.L.house.windows[i];
+      const err = validatePlacement(S.L, S.pieces, { type: 'protect', a: [i, 0] });
+      setTip(err || `Board up · ${fmt(BOARDUP.cost)}${S.risk && S.risk.has(i) ? ' · in the firing line' : ''}`, !!err, w.x + w.w / 2, w.y + w.h);
     }
   } else if (tool === 'order') {
     const i = pieceAt(pt);
@@ -778,6 +816,7 @@ function loadLevel(i) {
   const def = LEVELS[i];
   const L = prepLevel(def);
   S.L = L;
+  S.risk = windowsAtRisk(L);
   buildLevelScene(L);
   buildOverlay(L);
   S.pieces = cleanPieces(save.d.designs[L.id] || []);
@@ -826,7 +865,8 @@ function openBrief() {
     <div class="loads"><span class="h">Dave will carry up</span><span class="h" style="text-align:right">Weight</span><span class="h" style="text-align:right">Height</span>${loads}</div>
     <div class="facts">${facts.join('')}${best ? `<span class="chip">Your best ${fmt(best)}</span>` : ''}</div>
     <p class="tipline">${L.tip}</p>
-    ${L.chavs ? `<p class="tipline chav">After Dave's done, ${L.chavs > 1 ? L.chavs + ' local lads' : 'a local lad'} will turn up to swing on your tubes and climb any ladder that isn't locked. Every tag on the house costs ${fmt(TAG_COST)} to clean off. Trap one in the wreckage and the police will come and take them away (bonus point).</p>` : ''}
+    ${S.risk && S.risk.size ? `<p class="tipline">Anything over ${WINDOW_BREAK_KG} kg dumped in front of a window puts a brick through it: £${GLAZIER} to the glazier, or £${BOARDUP.cost} to board it up first. ${S.risk.size} window${S.risk.size > 1 ? 's are' : ' is'} in the firing line on this job.</p>` : ''}
+    ${L.chavs ? `<p class="tipline chav">After Dave's done, ${L.chavs > 1 ? L.chavs + ' local lads' : 'a local lad'} will turn up to swing on your tubes and climb any ladder that isn't locked. Every tag on the house costs ${fmt(TAG_COST)} to clean off. You don't have to lock them out: lay <b>trap boards</b> where they'll walk. A chav who drops ${SAFE_FALL} m or less gets carted off by the police, who pay ${fmt(TRAP_REWARD)} each. Drop one further than that and you get sued.</p>` : ''}
     <p class="terry"><b>Big Terry:</b> “${TERRY[L.id - 1]}”</p>
     <div class="row"><button class="big ghost" id="briefBack">Job sheet</button><button class="big" id="briefGo">${S.pieces.length ? 'Back to it' : 'Start the job'}</button></div>`;
   hudDesign(false);
@@ -894,6 +934,7 @@ function startTest() {
   S.trial.skipDeliveries = !S.req.ok;
   S.trial.unfinished = !S.req.ok;
 
+  S.windows = 0;
   S.acc = 0; S.logI = 0; S.evI = 0; S.lastIdx = -1; S.resultT = 0; S.zoff = []; S.dusk = 0; S.policeWait = 0;
   clearPeopleFx();
   resetPolice();
@@ -902,7 +943,7 @@ function startTest() {
   tipLabel.visible = false;
   overlay.visible = false;
   for (const l of labels) if (l.group === 'design') l.visible = false;
-  clearLabels('order');
+  clearLabels('order'); clearLabels('risk');
   show('tools', false); show('help', false); $('orderPanel').hidden = true;
   $('buildBtn').hidden = true; $('speed').hidden = false; $('stopBtn').hidden = false;
   show('status');
@@ -937,9 +978,11 @@ function testStatus() {
   if (tr.result && !tr.result.ok) return status(tr.result.sued ? 'Sued' : 'Collapse', tr.result.reason, true);
   if (tr.phase === 'chavs') {
     const cs = tr.chavs.filter(c => c.visible && c.state !== 'gone');
-    const tags = tr.tags.length ? ` · ${tr.tags.length} tag${tr.tags.length > 1 ? 's' : ''} (${fmt(tr.tags.length * TAG_COST)} clean-up)` : '';
+    const tags = (S.windows ? ` · ${S.windows} window${S.windows > 1 ? 's' : ''} smashed` : '') + (tr.tags.length ? ` · ${tr.tags.length} tag${tr.tags.length > 1 ? 's' : ''} (${fmt(tr.tags.length * TAG_COST)} clean-up)` : '');
     let msg = 'The local youth have arrived';
-    if (cs.some(c => c.state === 'spray')) msg = 'A chav is tagging the house!';
+    if (tr.trappedCount) msg = `${tr.trappedCount} chav${tr.trappedCount > 1 ? 's' : ''} through a trap board!`;
+    if (tr.trappedCount && S.t % 4 < 2) {}
+    else if (cs.some(c => c.state === 'spray')) msg = 'A chav is tagging the house!';
     else if (cs.some(c => c.state === 'bounce')) msg = 'Chavs jumping on your boards';
     else if (cs.some(c => c.state === 'route')) msg = 'A chav is up your ladder!';
     else if (cs.some(c => c.state === 'hang')) msg = 'Chavs swinging on your tubes';
@@ -964,7 +1007,10 @@ function showResult() {
   const tr = S.trial, L = S.L;
   const materials = designCost(L, S.pieces);
   const tags = tr.tags.length;
-  const cost = materials + tags * TAG_COST;
+  const smashed = (tr.result && tr.result.ok) ? (S.windows || 0) : 0;
+  const trappedN = (tr.result && tr.result.trapped) || 0;
+  const reward = (tr.result && tr.result.ok) ? trappedN * TRAP_REWARD : 0;
+  const cost = materials + tags * TAG_COST + smashed * GLAZIER - reward;
   const stood = tr.result && tr.result.ok && !tr.unfinished;
   const unfinished = tr.result && tr.result.ok && tr.unfinished;
   const sued = tr.result && tr.result.sued;
@@ -979,9 +1025,9 @@ function showResult() {
     sfx.fanfare();
   } else sfx.wah();
   const next = S.li + 1 < LEVELS.length;
-  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : tags && materials <= L.budget ? `It stood, but the graffiti clean-up (${fmt(tags * TAG_COST)}) ate the profit. Lock your ladders.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
+  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed) && materials <= L.budget ? `It stood, but ${smashed ? `the glazier (${fmt(smashed * GLAZIER)})` : ''}${smashed && tags ? ' and ' : ''}${tags ? `the graffiti clean-up (${fmt(tags * TAG_COST)})` : ''} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
   const band = ok ? ['Safe for use*', '*as far as Terry knows'] : unfinished ? ['Not finished', 'No platform, no pay'] : sued ? ['Sued', 'See you in court'] : stood ? ['Not paid', 'Over the quote'] : ['Do not use', 'Scaffold incomplete'];
-  const kills = ((tr.result && tr.result.trapped) || 0);
+  const kills = trappedN;
   if (kills) { save.d.chavKills = (save.d.chavKills || 0) + kills; save.write(); }
   const daveLine = tr.result && tr.result.daveDown ? "Deceased (it's what he'd have wanted)" : 'Dave (signed with an X)';
   $('result').innerHTML = `<div class="tag ${ok ? 'good' : sued ? 'sued' : 'bad'}">
@@ -989,6 +1035,8 @@ function showResult() {
     <div class="fields">
       <span class="k">Job</span><span class="v">${String(L.id).padStart(2, '0')} · ${L.name}</span>
       <span class="k">Materials</span><span class="v num">${fmt(materials)}</span>
+      ${reward ? `<span class="k">Police reward</span><span class="v num bonus">+${fmt(reward)} (${trappedN} chav${trappedN > 1 ? 's' : ''})</span>` : ''}
+      ${smashed ? `<span class="k">Glazier</span><span class="v num">${fmt(smashed * GLAZIER)} (${smashed} window${smashed > 1 ? 's' : ''})</span>` : ''}
       ${tags ? `<span class="k">Graffiti</span><span class="v num">${fmt(tags * TAG_COST)} (${tags} tag${tags > 1 ? 's' : ''})</span>` : ''}
       <span class="k">Quote</span><span class="v num">${fmt(L.budget)}</span>
       ${ok ? `<span class="k">Profit</span><span class="v num">${fmt(L.budget - cost)}</span>` : `<span class="k">Reason</span><span class="v">${reason}</span>`}
@@ -1024,7 +1072,11 @@ function stepTest(dt) {
   for (; S.logI < tr.log.length; S.logI++) {
     const ev = tr.log[S.logI];
     if (ev.type === 'member') { spawnTubeDebris(ev, L); S.shake = Math.max(S.shake, 0.08); }
-    else if (ev.type === 'board') { spawnBoardDebris(ev, L); S.shake = Math.max(S.shake, 0.1); if (ev.reason === 'overload') shout('SNAP!', (ev.ax + ev.bx) / 2, ev.ay + 0.6); }
+    else if (ev.type === 'board') {
+      spawnBoardDebris(ev, L); S.shake = Math.max(S.shake, 0.1);
+      const isTrap = tr.sim.boards[ev.id] && tr.sim.boards[ev.id].type.id === 'trap';
+      if (ev.reason === 'overload') shout(isTrap ? 'GOTCHA!' : 'SNAP!', (ev.ax + ev.bx) / 2, ev.ay + 0.6, isTrap ? 'bonus' : '');
+    }
     else if (ev.type === 'tie') { wallChunks(ev.x, ev.y); sfx.crack(); shout('POP!', ev.x, ev.y + 0.5); }
   }
   for (; S.evI < tr.events.length; S.evI++) {
@@ -1033,6 +1085,12 @@ function stepTest(dt) {
     else if (ev.type === 'splat') { sfx.splat(); }
     if (ev.type === 'land') {
       const it = ev.item;
+      if (it.def.mass >= WINDOW_BREAK_KG) (S.L.house.windows || []).forEach((w, i) => {
+        if (w.x < it.x + it.def.w / 2 + 0.3 && w.x + w.w > it.x - it.def.w / 2 - 0.3 && w.y >= it.zoneY - 0.5 && w.y <= it.zoneY + 1.8) {
+          const b = windowBreakable(i);
+          if (b && !b.glassBroken && smashGlass(b)) { S.windows++; shout('SMASH!', w.x + w.w / 2, w.y + w.h / 2); }
+        }
+      });
       puff(it.x, it.y, Z_MID, 6 + Math.round(it.def.mass / 100), 0.5 + it.def.mass / 1500);
       sfx.thud(it.def.mass);
       S.shake = Math.max(S.shake, Math.min(0.25, it.def.mass / 4000));
@@ -1046,7 +1104,7 @@ function stepTest(dt) {
   if (tr.building && tr.building._added && !tr.building._snd) {
     tr.building._snd = true;
     const t = tr.building.type;
-    if (t === 'board' || t === 'deck') sfx.thunk(); else sfx.clank(0.8);
+    if (t === 'board' || t === 'deck' || t === 'trap') sfx.thunk(); else sfx.clank(0.8);
   }
   // collapse drama: failing nodes drift away from the wall
   if (tr.result && !tr.result.ok) {
@@ -1066,7 +1124,7 @@ function stepTest(dt) {
         nodes: sim.nodes.filter(n => !n.hidden && n.arms.length).map(n => ({ id: n.id, x: n.x, y: n.y, z: Z_MID + (S.zoff[n.id] || 0) })),
         nodePos: (id) => { const n = sim.nodes[id]; return { x: n.x, y: n.y, z: Z_MID + (S.zoff[id] || 0) }; },
       } : null;
-      const vel = p.tangled ? { x: p.vx || 0, y: p.vy || 0, z: 0.3 } : { x: p.vx || 0, y: Math.max(0, p.vy || 0) + 1.5, z: 1.2 + Math.random() * 1.5 };
+      const vel = { x: p.vx || 0, y: p.tangled ? (p.vy || 0) : -1, z: 0.3 };
       const rd = spawnRagdoll(mesh, p, L, vel, tangle);
       if (p.who === 'chav') rd.chavMesh = mesh;
       shout(p.who === 'dave' ? 'AAARGH!' : 'OI!', p.x, p.y + 2);
@@ -1078,24 +1136,31 @@ function stepTest(dt) {
     r.life = (r.life || 0) + dt;
     if (!r.dead && r.life > 0.8 && (r.still > 0.25 || r.life > 3)) {
       r.dead = true;
-      if (r.key === 'dave') comicDeath(r);
-      else { shout('+1 CHAV', r.center.x, r.center.y + 1.6, 'bonus'); sfx.fanfare(); }
+      if (r.key === 'dave' || (r.person && r.person.dead)) comicDeath(r);
+      else { shout(`+${fmt(TRAP_REWARD)} REWARD`, r.center.x, r.center.y + 1.6, 'bonus'); sfx.fanfare(); }
     }
   }
-  // chavs stuck in the wreckage: somebody's called the police
-  const stuck = ragdolls.filter(r => r.key !== 'dave' && r.dead);
-  if (stuck.length && !police.active && !police.done && stuck.length === ragdolls.filter(r => r.key !== 'dave').length && (S.policeWait = (S.policeWait || 0) + dt) > 1.2) startPolice(stuck, L);
+  // chavs lying dazed or stuck in the wreckage: somebody's called the police
+  const stuck = ragdolls.filter(r => r.key !== 'dave' && r.dead && !r.queued && !(r.person && r.person.dead));
+  if (stuck.length && !police.active) { S.policeWait = (S.policeWait || 0) + dt; if (S.policeWait > 1.2) { S.policeWait = 0; startPolice(stuck, L); } }
   // anything moving fast knocks the scenery about
   const hitters = [];
-  for (const n of tr.sim.nodes) {
+  const collapsed = tr.result && !tr.result.ok;
+  if (collapsed) for (const n of tr.sim.nodes) {
     if (n.hidden || !n.alive) continue;
     const sp = Math.hypot(n.vx, n.vy);
     if (sp > 1.0) hitters.push({ x: n.x, y: n.y, z: Z_MID + (S.zoff[n.id] || 0), vx: n.vx, vy: n.vy });
   }
   for (const d of debris) if (!d.rest && Math.hypot(d.vx, d.vy) > 1.5) hitters.push({ x: d.mesh.position.x, y: d.mesh.position.y, z: d.mesh.position.z, vx: d.vx, vy: d.vy });
   for (const r of ragdolls) if (r.speed > 2) hitters.push({ x: r.center.x, y: r.center.y, z: r.center.z, vx: 0, vy: -2 });
-  for (const it of tr.items) if (it.state === 'falling' && Math.abs(it.vy) > 2) hitters.push({ x: it.x, y: it.y, z: Z_MID, vx: 0, vy: it.vy });
+  for (const it of tr.items) if (it.state === 'falling' && it.zoneY === null && Math.abs(it.vy) > 2) hitters.push({ x: it.x, y: it.y, z: Z_MID, vx: 0, vy: it.vy });
   if (hitters.length) checkBreakables(hitters);
+  // chavs jumping about in front of a window
+  for (const c of tr.chavs) if (c.state === 'bounce' && c.t > 1) {
+    const i = windowInFront(S.L, c.x, c.zy ?? Math.round(c.y), 0.2);
+    const b = i >= 0 ? windowBreakable(i) : null;
+    if (b && !b.glassBroken && !b.protected && smashGlass(b)) { S.windows++; shout('SMASH!', c.x, c.y + 1.4); }
+  }
   // spray-paint mist
   for (const [i, c] of tr.chavs.entries()) if (c.state === 'spray' && Math.random() < 0.5) {
     puff(c.x - 0.15 + Math.sin(S.t * 2.3) * 0.4, c.y + 1.3, 0.2, 1, 0.25, [0xff2d8a, 0x2dff6a, 0x2dc8ff, 0xffd12d][i % 4]);
@@ -1106,7 +1171,7 @@ function stepTest(dt) {
   S.dusk = (S.dusk || 0) + (duskT - (S.dusk || 0)) * Math.min(1, dt * S.speed * 0.4);
   if (tr.phase === 'done') {
     S.resultT += dt;
-    const waitPolice = (police.active || (ragdolls.some(r => r.key !== 'dave') && !police.done)) && S.resultT < 30;
+    const waitPolice = (police.active || ragdolls.some(r => r.key !== 'dave' && !r.queued && !(r.person && r.person.dead))) && S.resultT < 30;
     if (S.resultT > (ragdolls.length ? 4 : 1.1) && !waitPolice && $('result').hidden) showResult();
   }
   testStatus();
@@ -1148,7 +1213,7 @@ function renderTrial(dt) {
         f.matrix.decompose(f.position, f.quaternion, f.scale);
         f.visible = true;
       }
-    } else if (p.type === 'board' || p.type === 'deck') {
+    } else if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') {
       const mx = (p.a[0] + p.b[0]) / 2, my = p.a[1] + 0.1;
       flyBoard.material = p.type === 'deck' ? M.deck : M.wood;
       flyBoard.position.set(src.x + (mx - src.x) * e, src.y + (my - src.y) * e + lift, src.z + (Z_MID - src.z) * e);
@@ -1275,7 +1340,7 @@ function frame(now) {
   let windNow = S.L ? (S.L.wind ? S.L.wind * (0.7 + 0.3 * Math.sin(S.t * 0.61)) : 2) : 2;
   if (S.mode === 'design' && S.designSim) {
     const { hiPieces, hiBoards } = updateDesignHover();
-    scaffold.update(S.designSim, { highlight: hiPieces, hiBoard: hiBoards });
+    scaffold.update(S.designSim, { highlight: hiPieces, hiBoard: hiBoards, showTraps: true });
   } else if (S.mode === 'test' && S.trial) {
     stepTest(dt);
     if (S.trial) { renderTrial(dt); windNow = S.trial.sim.windAt(S.trial.sim.time); }
