@@ -31,9 +31,11 @@ function breakObject(b, h) {
   b.broken = true; sceneDirty = true;
   root.attach(b.obj);
   const r = () => Math.random() - 0.5;
-  if (b.kind === 'window' && b.glass) {
+  // the pane may already be gone (a brick went through it earlier)
+  if (b.kind === 'window' && b.glass && b.glass.parent && !b.glassBroken) {
     const gp = new THREE.Vector3(); b.glass.getWorldPosition(gp); root.worldToLocal(gp);
     b.glass.parent.remove(b.glass);
+    b.glassBroken = true;
     const shardGeo = new THREE.BufferGeometry();
     shardGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0.16, 0.03, 0, 0.05, 0.2, 0], 3));
     shardGeo.computeVertexNormals();
@@ -43,7 +45,7 @@ function breakObject(b, h) {
       m.position.set(gp.x + r() * b.rx, gp.y + r() * b.ry, 0.1);
       m.scale.setScalar(0.6 + Math.random());
       root.add(m);
-      debris.push({ mesh: m, vx: (h.vx || 0) * 0.3 + r() * 2, vy: Math.random() * 2, vz: 0.8 + Math.random() * 2, w: new THREE.Vector3(r() * 12, r() * 12, r() * 12), level: currentLevel(), keep: true, lift: 0.01, quiet: true });
+      debris.push({ mesh: m, vx: (h.vx || 0) * 0.3 + r() * 2, vy: Math.random() * 2, vz: 0.8 + Math.random() * 2, w: new THREE.Vector3(r() * 12, r() * 12, r() * 12), level: currentLevel(), keep: true, lift: 0.01, quiet: true, noHit: true });
     }
     sfx.glass();
   }
@@ -76,7 +78,7 @@ function smashGlass(b) {
     const m = new THREE.Mesh(shardGeo, sm);
     m.position.set(gp.x + r() * b.rx, gp.y + r() * b.ry, 0.1); m.scale.setScalar(0.5 + Math.random());
     root.add(m);
-    debris.push({ mesh: m, vx: r() * 1.5, vy: Math.random(), vz: 0.5 + Math.random() * 1.5, w: new THREE.Vector3(r() * 12, r() * 12, r() * 12), level: currentLevel(), keep: true, lift: 0.01, quiet: true });
+    debris.push({ mesh: m, vx: r() * 1.5, vy: Math.random(), vz: 0.5 + Math.random() * 1.5, w: new THREE.Vector3(r() * 12, r() * 12, r() * 12), level: currentLevel(), keep: true, lift: 0.01, quiet: true, noHit: true });
   }
   b.glassBroken = true; sceneDirty = true;
   sfx.glass();

@@ -987,7 +987,7 @@ function testStatus() {
     else if (cs.some(c => c.state === 'route')) msg = 'A chav is up your ladder!';
     else if (cs.some(c => c.state === 'hang')) msg = 'Chavs swinging on your tubes';
     else if (cs.some(c => c.state === 'rattle')) msg = 'Rattling the locked ladder. Nice try.';
-    else if (!cs.length) msg = 'They got bored and went home';
+    else if (!cs.length && tr.chavs.every(c => c.state === 'gone' || c.state === 'flat' || c.nicked)) msg = 'They got bored and went home';
     return status('After dark', msg + tags);
   }
   if (tr.phase === 'build') return status('Erecting', `Piece ${Math.min(tr.idx + 1, tr.pieces.length)} of ${tr.pieces.length}`);
@@ -1151,7 +1151,7 @@ function stepTest(dt) {
     const sp = Math.hypot(n.vx, n.vy);
     if (sp > 1.0) hitters.push({ x: n.x, y: n.y, z: Z_MID + (S.zoff[n.id] || 0), vx: n.vx, vy: n.vy });
   }
-  for (const d of debris) if (!d.rest && Math.hypot(d.vx, d.vy) > 1.5) hitters.push({ x: d.mesh.position.x, y: d.mesh.position.y, z: d.mesh.position.z, vx: d.vx, vy: d.vy });
+  for (const d of debris) if (!d.rest && !d.noHit && Math.hypot(d.vx, d.vy) > 1.5) hitters.push({ x: d.mesh.position.x, y: d.mesh.position.y, z: d.mesh.position.z, vx: d.vx, vy: d.vy });
   for (const r of ragdolls) if (r.speed > 2) hitters.push({ x: r.center.x, y: r.center.y, z: r.center.z, vx: 0, vy: -2 });
   for (const it of tr.items) if (it.state === 'falling' && it.zoneY === null && Math.abs(it.vy) > 2) hitters.push({ x: it.x, y: it.y, z: Z_MID, vx: 0, vy: it.vy });
   if (hitters.length) checkBreakables(hitters);
@@ -1311,7 +1311,17 @@ function moveCamera(dt) {
   }
 }
 const SUN_DAY = new THREE.Color(0xffeccc), SUN_DUSK = new THREE.Color(0xff8a4a);
+// One bad frame must never freeze the whole game: keep the loop alive and report the error once.
+let frameErr = null;
 function frame(now) {
+  requestAnimationFrame(frame);
+  try { frameBody(now); } catch (e) {
+    if (!frameErr || frameErr.message !== e.message) console.error(e);
+    frameErr = e;
+    try { renderer.render(scene, camera); } catch (e2) { }
+  }
+}
+function frameBody(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
   S.t += dt;
@@ -1388,7 +1398,6 @@ function frame(now) {
   sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 60);
   updateLabels();
   renderer.render(scene, camera);
-  requestAnimationFrame(frame);
 }
 
 // boot
