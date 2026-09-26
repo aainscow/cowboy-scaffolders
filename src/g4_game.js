@@ -986,6 +986,7 @@ function testStatus() {
     else if (cs.some(c => c.state === 'spray')) msg = 'A chav is tagging the house!';
     else if (cs.some(c => c.state === 'bounce')) msg = 'Chavs jumping on your boards';
     else if (cs.some(c => c.state === 'route')) msg = 'A chav is up your ladder!';
+    else if (cs.some(c => c.state === 'hang' && c.angry)) msg = "Locked out and livid: they're swinging on anything they can reach";
     else if (cs.some(c => c.state === 'hang')) msg = 'Chavs swinging on your tubes';
     else if (cs.some(c => c.state === 'rattle')) msg = 'Rattling the locked ladder. Nice try.';
     else if (!cs.length && tr.chavs.every(c => c.state === 'gone' || c.state === 'flat' || c.nicked)) msg = 'They got bored and went home';
@@ -1084,6 +1085,7 @@ function stepTest(dt) {
     const ev = tr.events[S.evI];
     if (ev.type === 'tag') { addTagDecal(ev.tag, tagDecals.length); shout('TAGGED!', ev.tag.x, ev.tag.y + 0.6); }
     else if (ev.type === 'splat') { sfx.splat(); }
+    else if (ev.type === 'angry') { shout('OI!! 😡', ev.x, ev.y + 2.2); }
     if (ev.type === 'land') {
       const it = ev.item;
       if (it.def.mass >= WINDOW_BREAK_KG) (S.L.house.windows || []).forEach((w, i) => {

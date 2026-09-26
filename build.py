@@ -12,7 +12,9 @@ parts = [imports, strip_local((src/'engine.js').read_text()), strip_local((src/'
          (src/'g2_level.js').read_text(), (src/'g3_actors.js').read_text(), (src/'g4_game.js').read_text()]
 js = '\n'.join(parts)
 importmap = '<script type="importmap">{"imports":{"three":"%sbuild/three.module.js","three/addons/":"%sexamples/jsm/"}}</script>' % (THREE, THREE)
-html = (src/'shell.html').read_text() + '\n' + importmap + '\n<script type="module">\n' + js + '\n</script>\n'
+import datetime
+BUILD = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+html = (src/'shell.html').read_text().replace('__BUILD__', BUILD) + '\n' + importmap + '\n<script type="module">\n' + js + '\n</script>\n'
 pathlib.Path('dist').mkdir(exist_ok=True)
 pathlib.Path('dist/index.html').write_text(html)
 # local preview wrapper (full document) for headless screenshots

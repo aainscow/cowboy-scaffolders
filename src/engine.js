@@ -1124,25 +1124,37 @@ export class Trial {
         return;
       }
     }
-    // 2) something low enough to jump up and swing on
-    const taken = new Set(this.chavs.filter(o => o !== c && o.member !== undefined).map(o => o.member));
-    const low = sim.members.filter(m => {
-      if (m.broken) return false;
-      const a = sim.nodes[m.a], b = sim.nodes[m.b];
-      if (a.gy !== b.gy) return false;
-      const h = a.gy - L.groundCol(Math.round((a.gx + b.gx) / 2));
-      return h >= 1 && h <= 2.6;
-    });
-    const free = low.filter(m => !taken.has(m.id));
-    if (free.length && c.swings < 2) {
-      const m = free[Math.floor(this.rng() * free.length)];
-      c.plan = 'swing'; c.member = m.id;
-      c.target = (sim.nodes[m.a].gx + sim.nodes[m.b].gx) / 2;
-      return;
-    }
-    // 3) rattle a locked ladder, then give up
+    // 2) the ladder's locked? give it a good rattle first (then get angry)
     const locked = sim.ladders.filter(l => l.locked && l.bottom < 0 && sim.ladderOk(l));
     if (locked.length && !c.rattled) { const l = locked[c.id % locked.length]; c.plan = 'rattle'; c.ladder = l.id; c.target = l.x + 0.3; return; }
+    // 3) something low enough to jump up and swing on. A chav who's been locked
+    //    out is angry and will grab anything in reach: braces, standards, the lot.
+    const taken = new Set(this.chavs.filter(o => o !== c && o.member !== undefined && o.state !== 'gone').map(o => o.member));
+    const grabs = [];
+    for (const m of sim.members) {
+      if (m.broken || taken.has(m.id)) continue;
+      const a = sim.nodes[m.a], b = sim.nodes[m.b];
+      const g = L.groundCol(Math.round((a.gx + b.gx) / 2));
+      if (a.gy === b.gy) {
+        const h = a.gy - g;
+        if (h >= 1 && h <= 2.6) grabs.push({ m, t: 0.5, rank: 0 });
+      } else if (c.angry) {
+        const lo = Math.min(a.gy, b.gy) - g, hi = Math.max(a.gy, b.gy) - g;
+        if (lo > 2.3 || hi < 1.8) continue;
+        const reach = Math.max(lo, Math.min(hi, 2.3));   // hands as high as he can jump
+        grabs.push({ m, t: (reach + g - a.gy) / (b.gy - a.gy), rank: a.gx === b.gx ? 2 : 1 });
+      }
+    }
+    const maxSwings = c.angry ? 3 : 2;
+    if (grabs.length && c.swings < maxSwings) {
+      const best = Math.min(...grabs.map(q => q.rank));
+      const pool = grabs.filter(q => q.rank === best);
+      const q = pool[Math.floor(this.rng() * pool.length)];
+      const a = sim.nodes[q.m.a], b = sim.nodes[q.m.b];
+      c.plan = 'swing'; c.member = q.m.id; c.grabT = q.t;
+      c.target = a.gx + (b.gx - a.gx) * q.t;
+      return;
+    }
     c.plan = 'leave'; c.target = -6;
   }
   _chavsUpdate(dt) {
@@ -1210,10 +1222,11 @@ export class Trial {
     if (c.state === 'hang') {
       const m = sim.members[c.member];
       const a = sim.nodes[m.a], b = sim.nodes[m.b];
-      c.x = (a.x + b.x) / 2; c.y = (a.y + b.y) / 2 - 2.0;
+      const gt = c.grabT ?? 0.5, rage = c.angry ? 1.4 : 1;
+      c.x = a.x + (b.x - a.x) * gt; c.y = a.y + (b.y - a.y) * gt - 2.0;
       c.onMember = m.id; c.onBoard = -1; c.onLadder = -1;
-      c.swing = Math.sin(c.t * 2.4 + c.phase) * Math.min(1, c.t / 1.5);
-      this._setLoad(c, { kind: 'member', member: m.id, t: 0.5, mass: CHAV_MASS * (1 + 0.35 * Math.abs(c.swing)), fx: 340 * c.swing });
+      c.swing = Math.sin(c.t * 2.4 * (c.angry ? 1.3 : 1) + c.phase) * Math.min(1, c.t / 1.5);
+      this._setLoad(c, { kind: 'member', member: m.id, t: gt, mass: CHAV_MASS * (1 + 0.35 * rage * Math.abs(c.swing)), fx: 340 * rage * c.swing });
       if (c.t > 6.5) { this._setLoad(c, null); c.onMember = -1; c.swing = 0; c.state = 'plan2'; c.t = 0; c.y = this.level.groundAt(c.x); }
       return;
     }
@@ -1226,8 +1239,9 @@ export class Trial {
     }
     if (c.state === 'plan2') {
       // one more go at something, then leave
-      if (c.plan === 'swing' && c.swings < 2 && this.rng() < 0.6) { c.state = 'plan'; return; }
-      if (c.plan === 'rattle') { c.plan = 'leave'; }
+      if (c.plan === 'swing' && c.swings < (c.angry ? 3 : 2) && (c.angry || this.rng() < 0.6)) { c.state = 'plan'; return; }
+      // locked out: that's it, he's furious, and he's taking it out on your tubes
+      if (c.plan === 'rattle' && !c.angry) { c.angry = true; c.swings = 0; this.events.push({ type: 'angry', chav: c.id, x: c.x, y: c.y }); c.state = 'plan'; return; }
       c.plan = 'leave'; c.target = -6; c.state = 'go'; c.t = 0;
       return;
     }
