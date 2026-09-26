@@ -1135,14 +1135,17 @@ function showResult() {
 //  Per-frame test update
 // ---------------------------------------------------------------------------
 const pileLocal = () => new THREE.Vector3(S.L.W + 3.4 - 0.2, 0.4, 4.8);
+const ZOFF_MAX = 2.2;
 function stepTest(dt) {
   const tr = S.trial, L = S.L;
   if (!tr) return;
+  let stepped = 0;   // sim time advanced this frame
   if (tr.phase !== 'done' || S.resultT < 1) {
     S.acc += dt * S.speed;
     let n = 0;
     while (S.acc >= 1 / 60 && n < 16) { tr.update(1 / 60); S.acc -= 1 / 60; n++; }
     if (n >= 16) S.acc = 0;
+    stepped = n / 60;
   }
   // sim events -> effects
   for (; S.logI < tr.log.length; S.logI++) {
@@ -1190,7 +1193,10 @@ function stepTest(dt) {
     for (const n of tr.sim.nodes) {
       if (n.hidden) continue;
       const sp = Math.hypot(n.vx, n.vy);
-      S.zoff[n.id] = (S.zoff[n.id] || 0) + dt * Math.min(1.6, sp * 0.3) * (n.y > 0.25 ? 1 : 0.1);
+      // only while the sim is actually running (velocities freeze once it stops), and never
+      // further out than the front of the pavement
+      const z0 = S.zoff[n.id] || 0;
+      S.zoff[n.id] = Math.min(ZOFF_MAX, z0 + stepped * Math.min(1.6, sp * 0.3) * (n.y > 0.25 ? 1 : 0.1) * Math.max(0, 1 - z0 / ZOFF_MAX));
     }
   } else S.crashed = false;
   // people who come off become ragdolls
