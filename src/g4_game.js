@@ -434,16 +434,32 @@ function refreshDocket() {
   $('tieCount').textContent = L.maxTies === 0 ? 'No ties allowed' : L.maxTies < 99 ? `Ties ${ties} / ${L.maxTies}` : `Ties ${ties}`;
   const z = req.zones[0];
   const items = [];
+  const sim = S.designSim;
   L.zones.forEach((zz, i) => {
     const r = req.zones[i];
-    items.push([r.boarded, `Platform boarded: ${r.covered} of ${r.need} m`]);
-    items.push([r.reachable, r.reachable ? 'Dave has a ladder up to it' : 'Dave needs ladders up to the platform']);
+    // trap boards look like the real thing but don't count, so say so
+    let trapM = 0;
+    for (let x = zz.x0; x < zz.x1; x++) { const bd = sim.boardUnder(x + 0.5, zz.y); if (bd && bd.type.id === 'trap') trapM++; }
+    items.push([r.boarded, `Platform boarded: ${r.covered} of ${r.need} m${trapM && !r.boarded ? ` (${trapM} m of trap boards don't count)` : ''}`]);
+    let daveMsg = r.reachable ? 'Dave has a ladder up to it' : 'Dave needs ladders up to the platform';
+    if (!r.reachable) {
+      const zn = []; for (const bd of sim.boardsAtLevel(zz.y)) if (bd.x1 > zz.x0 && bd.x0 < zz.x1) zn.push(bd.a, bd.b);
+      if (zn.length && sim.findRoute(L.startX ?? L.W + 2, zn, null, { traps: 'walk' })) daveMsg = "Dave's only way up crosses trap boards. He needs a route on real boards";
+    }
+    items.push([r.reachable, daveMsg]);
     if (zz._label) zz._label.el.classList.toggle('done', r.boarded);
   });
-  for (const h of req.heavy || []) items.push([false, `Dave + ${ITEMS[h.item].name.toLowerCase()} = ${h.carry} kg: he'd carry it across boards and snap them. Put his ladder within 1 m of the drop at ${h.x} m`]);
-  const unlocked = groundLadders.length - Math.min(locks, groundLadders.length);
+  for (const h of req.heavy || []) items.push([false, h.trap
+    ? `Dave would carry the ${ITEMS[h.item].name.toLowerCase()} over a trap board to the drop at ${h.x} m, and go straight through it`
+    : `Dave + ${ITEMS[h.item].name.toLowerCase()} = ${h.carry} kg: he'd carry it across boards and snap them. Put his ladder within 1 m of the drop at ${h.x} m`]);
+  // Chavs: ask the same route-finder the chavs use, rather than counting locks
+  // (a lock on an upper ladder doesn't stop anyone climbing the one below it).
+  const lockedAt = new Set(S.pieces.filter(p => p.type === 'lock').map(p => p.a.join(',')));
+  const unlocked = groundLadders.filter(l => !lockedAt.has(l.a.join(','))).length;
+  const boardNodes = []; for (const bd of sim.boards) boardNodes.push(bd.a, bd.b);
+  const chavsUp = boardNodes.length > 0 && !!sim.findRoute(-4, boardNodes, null, { allowLocked: false });
   const traps = S.pieces.filter(p => p.type === 'trap').length;
-  if (L.chavs) items.push(['info', unlocked ? `${unlocked} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : 'Ladders locked: chavs stay on the ground']);
+  if (L.chavs) items.push(['info', chavsUp ? `${Math.max(1, unlocked)} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : groundLadders.length ? 'Ladders locked: chavs stay on the ground' : 'No ladders yet: chavs stay on the ground']);
   const unprot = [...(S.risk || [])].filter(i => !S.pieces.some(p => p.type === 'protect' && p.a[0] === i)).length;
   if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? 'Windows in the firing line boarded' : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${GLAZIER} each if smashed`]);
   if (L.monster) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
@@ -925,6 +941,7 @@ function enterDesign() {
   show('select', false); show('title', false); show('result', false); show('status', false);
   hudDesign(true);
   $('buildBtn').hidden = false; $('speed').hidden = true; $('stopBtn').hidden = true;
+  $('checks').hidden = false;
   overlay.visible = true;
   clearLabels('fx');
   for (const l of labels) if (l.group === 'design') l.visible = true;
@@ -996,6 +1013,7 @@ function startTest() {
   show('tools', false); show('help', false); $('orderPanel').hidden = true;
   $('buildBtn').hidden = true; $('speed').hidden = false; $('stopBtn').hidden = false;
   show('status');
+  $('checks').hidden = true;     // it describes the design; it doesn't track what happens in the run
   setSpeed(S.speed);
 }
 function stopTest() {

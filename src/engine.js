@@ -788,7 +788,7 @@ export function planDelivery(sim, level, d) {
   for (const [id, t] of walked) {
     const bd = sim.boards[id];
     const load = carry * 4 * t * (1 - t);
-    if (load > bd.type.cap) overloads.push({ board: id, load, cap: bd.type.cap });
+    if (load > bd.type.cap) overloads.push({ board: id, load, cap: bd.type.cap, trap: bd.type.id === 'trap' });
   }
   return { route, endX, dropX, carry, overloads };
 }
@@ -809,7 +809,7 @@ export function checkRequirements(level, pieces) {
   const heavy = [];
   level.deliveries.forEach((d, i) => {
     const plan = zones[d.zone].reachable ? planDelivery(sim, level, d) : null;
-    if (plan && plan.overloads.length) heavy.push({ delivery: i, item: d.item, carry: plan.carry, x: d.x, y: level.zones[d.zone].y });
+    if (plan && plan.overloads.length) heavy.push({ delivery: i, item: d.item, carry: plan.carry, x: d.x, y: level.zones[d.zone].y, trap: plan.overloads.some(o => o.trap) });
   });
   return { zones, heavy, ok: zones.every(z => z.boarded && z.reachable) };
 }
