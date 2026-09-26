@@ -1,4 +1,4 @@
-import { prepLevel, designCost, windowsAtRisk } from '../src/engine.js';
+import { prepLevel, designCost, windowsAtRisk, validatePlacement } from '../src/engine.js';
 import { LEVELS } from '../src/levels.js';
 import { D, run, checkValid } from './run.mjs';
 
@@ -71,7 +71,12 @@ const RAW = {
 // every reference solution boards up the windows its heavy drops would smash
 export const REFS = Object.fromEntries(Object.entries(RAW).map(([id, f]) => [id, () => {
   const L = prepLevel(LEVELS.find(l => l.id === +id));
-  return [...f(), ...[...windowsAtRisk(L)].map(i => ({ type: 'protect', a: [i, 0] }))];
+  const ps = [...f(), ...[...windowsAtRisk(L)].map(i => ({ type: 'protect', a: [i, 0] }))];
+  if (L.monster) {   // a trap door on the first free bit of pavement
+    const hx = [...Array(L.W + 1).keys()].find(x => !validatePlacement(L, ps, { type: 'hatch', a: [x, L.groundCol(x)] }));
+    ps.push({ type: 'hatch', a: [hx, L.groundCol(hx)] });
+  }
+  return ps;
 }]));
 
 if ((process.argv[1] || '').endsWith('refs.mjs')) {

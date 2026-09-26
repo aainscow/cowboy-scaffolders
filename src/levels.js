@@ -45,7 +45,7 @@ export const LEVELS = [
     forbidden: [{ x0: 4, y0: 0, x1: 7, y1: 3, kind: 'door', label: 'Keep clear' }],
     zones: [{ x0: 3, x1: 8, y: 4, label: 'Repointing' }],
     deliveries: [{ item: 'bags', zone: 0, x: 5.5 }, { item: 'tiles', zone: 0, x: 4 }],
-    budget: 880, chavs: 2, startX: 13,
+    budget: 910, chavs: 2, startX: 13, monster: true,
   },
   {
     id: 5, name: 'Prize Roses', client: 'Major Thistlewood (ret.)',
@@ -78,7 +78,7 @@ export const LEVELS = [
     zones: [{ x0: 3, x1: 8, y: 6, label: 'Cornice' }],
     deliveries: [{ item: 'tiles', zone: 0, x: 4 }, { item: 'bags', zone: 0, x: 6.5 }],
     wind: 8, gust: 10, maxTies: 0,
-    budget: 1050, chavs: 3, startX: 13,
+    budget: 1080, chavs: 3, startX: 13, monster: true,
   },
   {
     id: 8, name: 'The Lightwell', client: 'Flat B, 27 Regent Terrace',
@@ -112,7 +112,7 @@ export const LEVELS = [
     zones: [{ x0: 3, x1: 8, y: 6, label: 'Studio' }],
     deliveries: [{ item: 'piano', zone: 0, x: 4 }, { item: 'grand', zone: 0, x: 6.5 }],
     wind: 6, gust: 8, deck: true, heavy: true, maxTies: 4,
-    budget: 1840, chavs: 3, startX: 13,
+    budget: 1870, chavs: 3, startX: 13, monster: true,
   },
   {
     id: 11, name: 'Chimney Stack', client: 'Tall House, Windy Ridge',

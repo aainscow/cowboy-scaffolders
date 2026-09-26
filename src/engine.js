@@ -24,6 +24,9 @@ export const TRAP_REWARD = 100;      // police reward per chav handed over
 export const SAFE_FALL = 3.5;        // a chav survives a drop up to this (metres)
 export const GLAZIER = 120;          // per broken window
 export const BOARDUP = { cost: 35 }; // plywood over a window
+export const HATCH = { cost: 30 };   // trap door into the secret basement (monster jobs)
+export const NEW_BUILDER = 100;      // the agency's fee when the monster eats Dave
+export const MONSTER_X = -4;         // the drain it crawls out of
 export const WINDOW_BREAK_KG = 100;  // dumping this much in front of a window puts a brick through it
 
 // Windows a delivery will smash unless they're boarded up: heavy drops landing right in front of them.
@@ -100,6 +103,7 @@ export function pieceCost(p) {
   if (p.type === 'ladder') return LADDER.cost * Math.abs(p.b[1] - p.a[1]);
   if (p.type === 'lock') return LOCK.cost;
   if (p.type === 'protect') return BOARDUP.cost;
+  if (p.type === 'hatch') return HATCH.cost;
   return 0;
 }
 function baseCostFor(p) { return 0; }
@@ -686,6 +690,7 @@ export function validatePlacement(level, pieces, p) {
     if (len > MAX_LEN + 1e-6) return 'Too long: tubes are at most 3 m';
     const pts = splitTube(p.a, p.b);
     for (const pt of pts) if (Math.abs(pt[1] - L.groundCol(pt[0])) < 1e-6 && !L.canBase(pt[0])) return "Can't put a base plate there";
+    for (const pt of pts) if (Math.abs(pt[1] - L.groundCol(pt[0])) < 1e-6 && pieces.some(q => q.type === 'hatch' && q.a[0] === pt[0])) return 'Not on the trap door';
     for (let i = 0; i <= 20; i++) {
       const x = p.a[0] + dx * i / 20, y = p.a[1] + dy * i / 20;
       if (L.inForbidden(x, y)) return 'Keep that area clear';
@@ -719,6 +724,7 @@ export function validatePlacement(level, pieces, p) {
     if (!onGround && !landing(p.a)) return 'The foot needs the ground or a boarded platform';
     if (!landing(p.b)) return 'The top needs a boarded platform to step off onto';
     for (let y = p.a[1]; y <= p.b[1] + 1; y += 0.25) if (L.inForbidden(p.a[0] + 0.3, y) || L.inForbidden(p.a[0] + 0.1, y)) return 'Keep that area clear';
+    if (onGround && pieces.some(q => q.type === 'hatch' && q.a[0] === p.a[0])) return "Not on the trap door";
     for (const q of ladders) if (q.a[0] === p.a[0] && q.a[1] < p.b[1] && q.b[1] > p.a[1]) return 'Already a ladder there';
     return null;
   }
@@ -726,6 +732,15 @@ export function validatePlacement(level, pieces, p) {
     const l = ladders.find(q => q.a[0] === p.a[0] && q.a[1] === p.a[1]);
     if (!l) return 'Locks go on the foot of a ladder';
     if (lockSet.has(p.a.join(','))) return 'Already locked';
+    return null;
+  }
+  if (p.type === 'hatch') {
+    if (!L.monster) return 'Nothing down the drains on this job';
+    const x = p.a[0];
+    if (x !== Math.round(x) || x < 0 || x > L.W) return 'Put it in the pavement in front of the house';
+    if (!L.canBase(x)) return "Can't dig there";
+    if (pieces.some(q => q.type === 'hatch')) return 'One trap door is plenty';
+    if (nodeSet.has(x + ',' + L.groundCol(x))) return "There's a base plate in the way";
     return null;
   }
   if (p.type === 'protect') {
@@ -884,10 +899,12 @@ export class Trial {
     } else if (this.phase === 'chavs') {
       this.chavT += dt;
       this._chavsUpdate(dt);
-      if (this.chavs.every(c => c.state === 'gone' || c.state === 'flat') || this.chavT > 60) { this.phase = 'hold'; this.pieceT = 0; this.builder.state = 'waving'; }
+      if (this.chavs.every(c => c.state === 'gone' || c.state === 'flat') || this.chavT > 60) this._nightOver();
+    } else if (this.phase === 'monster') {
+      this._monsterUpdate(dt);
     } else if (this.phase === 'hold') {
       this.pieceT += dt;
-      if (this.pieceT > 2.5 && !this.result) { this.phase = 'done'; this.result = { ok: true, tags: this.tags.length, trapped: this.trappedCount || 0 }; }
+      if (this.pieceT > 2.5 && !this.result) { this.phase = 'done'; this.result = { ok: true, tags: this.tags.length, trapped: this.trappedCount || 0, eaten: !!this.daveEaten, monsterTrapped: !!this.monsterTrapped }; }
     } else if (this.phase === 'failing') {
       this.failT += dt;
       if (this.failT > 4.5) this.phase = 'done';
@@ -1030,7 +1047,7 @@ export class Trial {
     if (this.skipDeliveries) this.deliv = L.deliveries.length;
     if (this.deliv >= L.deliveries.length) {
       if (L.chavs > 0) { this.phase = 'chavs'; this.chavT = 0; this._spawnChavs(); b.state = 'watch'; b.visible = true; b.x = this.startX + 0.8; b.face = -1; }
-      else { this.phase = 'hold'; this.pieceT = 0; b.state = 'waving'; }
+      else this._nightOver();
       return;
     }
     this.phase = 'deliver';
@@ -1093,6 +1110,54 @@ export class Trial {
       b.u += dir * Math.min(Math.abs(end.gx - b.u), walkV * dt);
       if (!this._placeOnBoard(b, b.zy, mass)) { this._fall(b, 0, 0); return; }
       if (Math.abs(end.gx - b.u) < 1e-3) { b.u = null; b.returning = true; b.state = 'route'; b.routeI = route.length - 2; b.segT = 0; }
+    }
+  }
+
+  // ---- the thing in the drains ----
+  _nightOver() {
+    const b = this.builder;
+    if (this.level.monster && !this.monster) {
+      this.phase = 'monster';
+      b.visible = true; b.state = 'watch'; b.x = this.startX + 0.8; b.y = this.level.groundAt(b.x); b.face = -1; b.mode = 'ground';
+      b.onBoard = b.onLadder = b.onMember = -1; this._setLoad(b, null);
+      this.monster = { x: MONSTER_X, y: this.level.groundAt(MONSTER_X) - 1.6, state: 'emerge', t: 0, face: 1 };
+      this.events.push({ type: 'monster', what: 'emerge' });
+      return;
+    }
+    this.phase = 'hold'; this.pieceT = 0; b.state = 'waving';
+  }
+  _monsterUpdate(dt) {
+    const m = this.monster, b = this.builder, L = this.level;
+    m.t += dt;
+    const ground = (x) => L.groundAt(x);
+    if (m.state === 'emerge') {
+      m.y = Math.min(ground(m.x), ground(m.x) - 1.6 + m.t * 1.1);
+      if (m.t > 2.2) { m.state = 'walk'; m.t = 0; this.events.push({ type: 'monster', what: 'roar' }); }
+    } else if (m.state === 'walk') {
+      const target = b.x - 0.7;
+      const nx = Math.min(target, m.x + 1.35 * dt);
+      const hatch = this.pieces.find(p => p.type === 'hatch' && p.a[0] > m.x - 1e-6 && p.a[0] <= nx + 1e-6);
+      m.x = nx; m.y = ground(m.x);
+      if (hatch) { m.x = hatch.a[0]; m.state = 'fall'; m.t = 0; m.hatchX = hatch.a[0]; this.monsterTrapped = true; this.events.push({ type: 'monster', what: 'trapped', x: m.x }); }
+      else if (m.x >= target - 1e-6) { m.state = 'eat'; m.t = 0; b.state = 'scared'; b.face = -1; this.events.push({ type: 'monster', what: 'chomp', x: b.x }); }
+    } else if (m.state === 'fall') {
+      m.y = ground(m.x) - 0.5 * GRAV * m.t * m.t;
+      if (m.t > 2.6 && m.state !== 'gone') { m.state = 'gone'; this.events.push({ type: 'monster', what: 'portal', x: m.x }); }
+    } else if (m.state === 'gone') {
+      if (m.t > 4.2) { this.phase = 'hold'; this.pieceT = 0; b.state = 'waving'; }
+    } else if (m.state === 'eat') {
+      if (m.t > 0.6 && b.visible && !this.daveEaten) { this.daveEaten = true; b.visible = false; b.state = 'eaten'; }
+      if (m.t > 2.2) {
+        m.state = 'leave'; m.t = 0;
+        // the agency sends someone round
+        Object.assign(b, { who: 'agency', visible: true, state: 'arrive', x: this.startX + 10, y: ground(this.startX + 10), face: -1, mode: 'ground', carrying: null });
+        this.events.push({ type: 'monster', what: 'hired' });
+      }
+    } else if (m.state === 'leave') {
+      m.x += 1.8 * dt; m.y = ground(m.x);
+      const there = b.state !== 'arrive' || this._walkGround(b, this.startX + 0.8, 1.4, dt);
+      if (there && b.state === 'arrive') { b.state = 'watch'; b.face = -1; }
+      if (m.x > this.startX + 16 && b.state !== 'arrive') { m.state = 'away'; this.phase = 'hold'; this.pieceT = 0; b.state = 'waving'; }
     }
   }
 

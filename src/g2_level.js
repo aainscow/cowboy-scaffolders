@@ -100,6 +100,36 @@ function syncBoardUps(L, pieces) {
     levelGroup.add(m); boardUps.push(m);
   });
 }
+// The trap door into the secret basement, and the drain the monster lives in.
+const HATCH_Z = 2.95;
+let hatchViews = [], manhole = null;
+const hatchMat = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.8, map: woodTex });
+const holeMat = new THREE.MeshBasicMaterial({ color: 0x07030c });
+const ironMat = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.5, metalness: 0.7 });
+function syncHatches(L, pieces) {
+  for (const h of hatchViews) h.g.parent && h.g.parent.remove(h.g);
+  hatchViews = [];
+  if (manhole) { manhole.g.parent && manhole.g.parent.remove(manhole.g); manhole = null; }
+  if (!L.monster) return;
+  for (const p of pieces.filter(q => q.type === 'hatch')) {
+    const x = p.a[0], y = L.groundAt(x);
+    const g = new THREE.Group(); g.position.set(x, y, HATCH_Z);
+    const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.0), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.012; hole.visible = false; g.add(hole);
+    const glow = new THREE.PointLight(0xb04dff, 0, 6); glow.position.y = 0.4; g.add(glow);
+    const hinge = new THREE.Group(); hinge.position.set(0, 0.03, -0.55); g.add(hinge);   // hinged on the house side
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.05, 1.08), hatchMat); lid.position.z = 0.55; lid.castShadow = true; lid.receiveShadow = true; hinge.add(lid);
+    for (const dz of [0.2, 0.9]) { const s = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.06, 0.07), ironMat); s.position.set(0, 0.005, dz); hinge.add(s); }
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.015, 6, 14), ironMat); ring.rotation.x = Math.PI / 2; ring.position.set(0, 0.035, 0.95); hinge.add(ring);
+    levelGroup.add(g);
+    hatchViews.push({ g, hinge, hole, glow, x, open: 0, target: 0, glowT: 0 });
+  }
+  const mx = MONSTER_X, my = L.groundAt(0);
+  const g = new THREE.Group(); g.position.set(mx, my, HATCH_Z);
+  const hole = new THREE.Mesh(new THREE.CircleGeometry(0.62, 24), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.01; g.add(hole);
+  const cover = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.04, 24), ironMat); cover.position.y = 0.03; cover.receiveShadow = true; g.add(cover);
+  levelGroup.add(g);
+  manhole = { g, cover, open: 0 };
+}
 function windowBreakable(i) { return breakables.find(b => b.kind === 'window' && b.wi === i); }
 function wallChunks(x, y) {
   const bm = new THREE.MeshStandardMaterial({ color: 0x9c4a33, roughness: 0.9 });

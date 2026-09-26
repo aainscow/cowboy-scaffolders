@@ -29,7 +29,7 @@ export function run(level, pieces, { verbose = false, maxT = 400 } = {}) {
   let maxU = 0, maxJ = 0;
   for (const m of sim.members) if (!m.broken) maxU = Math.max(maxU, m.util);
   for (const j of sim.joints) maxJ = Math.max(maxJ, j.util);
-  return { ev: tr.log.slice(0,3).map(e=>e.type+':'+(e.reason||'')+'@'+(e.ax??e.x)?.toFixed?.(1)+','+(e.ay??e.y)?.toFixed?.(1)).join(' '), bs: tr.builder.state+'/'+tr.deliv+' '+tr.builder.x.toFixed(1)+','+tr.builder.y.toFixed(1), ok: tr.result?.ok, tags: tr.tags.length, reason: tr.result?.reason, t: t.toFixed(1), disp: tr.maxDispSeen.toFixed(3), broken: sim.members.filter(m => m.broken).length, maxU: maxU.toFixed(2), maxJ: maxJ.toFixed(2), cost: designCost(level, pieces) };
+  return { ev: tr.log.slice(0,3).map(e=>e.type+':'+(e.reason||'')+'@'+(e.ax??e.x)?.toFixed?.(1)+','+(e.ay??e.y)?.toFixed?.(1)).join(' '), bs: tr.builder.state+'/'+tr.deliv+' '+tr.builder.x.toFixed(1)+','+tr.builder.y.toFixed(1), ok: tr.result?.ok, eaten: tr.result?.eaten, monsterTrapped: tr.result?.monsterTrapped, tags: tr.tags.length, reason: tr.result?.reason, t: t.toFixed(1), disp: tr.maxDispSeen.toFixed(3), broken: sim.members.filter(m => m.broken).length, maxU: maxU.toFixed(2), maxJ: maxJ.toFixed(2), cost: designCost(level, pieces) };
 }
 
 export function checkValid(level, pieces) {

@@ -181,6 +181,7 @@ const STYLES = {
   chav2: { top: 0xa1a7ad, sleeve: 0xa1a7ad, legs: 0x5e6369, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xd8c690, skin: 0xf2c9a8, stripe: 0x111111, can: 0x2dc8ff },
   police: { top: 0xc8f000, vest: true, glow: 0x88aa00, sleeve: 0x1b2233, legs: 0x1b2233, shoe: 0x111111, hat: 'police', hatCol: 0x141c2e, skin: 0xe8b996 },
   sheila: { top: 0xf2a7c3, sleeve: 0xf2a7c3, legs: 0xf6dfe6, shoe: 0xff8fbf, hat: 'curlers', hatCol: 0x9a6a44, skin: 0xf0c4a4, gown: 0xf2a7c3, trim: 0xfff4f7 },
+  agency: { top: 0xf3d40b, vest: true, glow: 0x886600, sleeve: 0x55595e, legs: 0x3b5a85, shoe: 0x2a2a2a, hat: 'hard', hatCol: 0x2a6bd6, skin: 0xc98e6a },
   chav3: { top: 0x161616, sleeve: 0x161616, legs: 0x161616, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xb0122a, skin: 0xd79e7a, stripe: 0xffffff, can: 0xffd12d },
 };
 const personMats = {};
@@ -300,7 +301,7 @@ function animatePerson(g, p, dt, t) {
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
   const st = p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
-  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant'].includes(st) ? st : p.mode;
+  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
   const groundZ = isDave ? 2.4 : 2.55 + (p.id || 0) * 0.14;
   let x = p.x, y = p.y, zT = groundZ, yawT = p.face > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -374,6 +375,11 @@ function animatePerson(g, p, dt, t) {
     for (const a of u.arms) { a.sh.rotation.x = -3.05; }
     u.legs[0].hp.rotation.x = -0.3 - (p.swing || 0) * 0.5; u.legs[1].hp.rotation.x = -0.1 - (p.swing || 0) * 0.6;
     u.legs[0].kn.rotation.x = 0.5; u.legs[1].kn.rotation.x = 0.3;
+  } else if (mode === 'scared') {
+    for (const a of u.arms) { a.sh.rotation.x = -2.7 + Math.sin(t * 30) * 0.1; a.el.rotation.x = -0.4; }
+    u.arms[0].sh.rotation.z = 0.5; u.arms[1].sh.rotation.z = -0.5;
+    u.legs[0].kn.rotation.x = u.legs[1].kn.rotation.x = 0.35 + Math.sin(t * 40) * 0.08;
+    u.head.rotation.x = -0.3; u.body.position.x = Math.sin(t * 40) * 0.02;
   } else if (mode === 'rant') {
     // fist shaken up at Dave, other hand on hip, head going
     u.arms[1].sh.rotation.x = -2.5 + Math.sin(t * 16) * 0.25; u.arms[1].sh.rotation.z = -0.25; u.arms[1].el.rotation.x = -0.6 + Math.sin(t * 16) * 0.3;
@@ -967,6 +973,107 @@ function updateSheila(dt, t, davePos) {
   P.y = L.groundAt(P.x);
   animatePerson(sheilaMesh, P, dt, t);
 }
+// ---------------------------------------------------------------------------
+//  The Drain Gobbler: a squat green thing with too many eyes that lives in the
+//  drains and comes up after dark. A trap door drops it into the secret
+//  basement and sends it back to the Underneath; otherwise it eats Dave.
+// ---------------------------------------------------------------------------
+const gobbler = (() => {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0x5f8f3a, roughness: 0.55 });
+  const belly = new THREE.MeshStandardMaterial({ color: 0xa9c66a, roughness: 0.7 });
+  const spot = new THREE.MeshStandardMaterial({ color: 0x6d3a8f, roughness: 0.6 });
+  const dark = new THREE.MeshBasicMaterial({ color: 0x1a0610 });
+  const tooth = new THREE.MeshStandardMaterial({ color: 0xfff8e6, roughness: 0.4 });
+  const eyeW = new THREE.MeshStandardMaterial({ color: 0xfff27a, roughness: 0.3, emissive: 0x665a00, emissiveIntensity: 0.4 });
+  const pupil = new THREE.MeshBasicMaterial({ color: 0x111111 });
+  const mesh = (geo, mat, x, y, z, parent = g) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; };
+  const body = new THREE.Group(); g.add(body);
+  mesh(new THREE.SphereGeometry(0.75, 22, 16), skin, 0, 0.8, 0, body).scale.set(1.2, 0.85, 1.0);
+  mesh(new THREE.SphereGeometry(0.62, 18, 12), belly, 0, 0.66, 0.2, body).scale.set(1.05, 0.7, 0.8);
+  for (let i = 0; i < 9; i++) { const a = i * 2.4, e = 0.3 + (i % 3) * 0.3; mesh(new THREE.SphereGeometry(0.07 + (i % 2) * 0.04, 8, 6), spot, Math.cos(a) * 0.82 * Math.cos(e), 0.8 + Math.sin(e) * 0.6, Math.sin(a) * 0.7 * Math.cos(e) - 0.05, body); }
+  // a big grin across the front, and a jaw that drops open
+  mesh(new THREE.SphereGeometry(0.5, 18, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), dark, 0, 0.78, 0.5, body).scale.set(1.15, 0.35, 0.5);
+  for (let i = 0; i < 9; i++) mesh(new THREE.ConeGeometry(0.045, 0.13, 6), tooth, -0.48 + i * 0.12, 0.72, 0.72 - Math.abs(i - 4) * 0.035, body).rotation.x = Math.PI;
+  const jaw = new THREE.Group(); jaw.position.set(0, 0.62, 0.35); body.add(jaw);
+  mesh(new THREE.SphereGeometry(0.5, 18, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), skin, 0, 0, 0.1, jaw).scale.set(1.12, 0.45, 0.62);
+  for (let i = 0; i < 7; i++) mesh(new THREE.ConeGeometry(0.04, 0.11, 6), tooth, -0.36 + i * 0.12, 0.06, 0.34 - Math.abs(i - 3) * 0.04, jaw);
+  // eyes on stalks
+  const eyes = [];
+  for (const [x, h, z] of [[-0.35, 0.55, 0.15], [0, 0.72, 0.05], [0.35, 0.5, 0.18], [0.18, 0.35, 0.45], [-0.2, 0.38, 0.42]]) {
+    const st = new THREE.Group(); st.position.set(x * 0.8, 1.3, z - 0.1); body.add(st);
+    mesh(new THREE.CylinderGeometry(0.035, 0.05, h, 6), skin, 0, h / 2, 0, st);
+    mesh(new THREE.SphereGeometry(0.1, 12, 10), eyeW, 0, h, 0, st);
+    mesh(new THREE.SphereGeometry(0.045, 8, 6), pupil, 0, h, 0.085, st);
+    eyes.push(st);
+  }
+  // six wriggly legs
+  const legs = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.3;
+    const lg = new THREE.Group(); lg.position.set(Math.cos(a) * 0.6, 0.35, Math.sin(a) * 0.5); body.add(lg);
+    const m = mesh(new THREE.CapsuleGeometry(0.1, 0.35, 4, 8), skin, 0, -0.2, 0, lg); m.rotation.z = Math.cos(a) * 0.5; m.rotation.x = -Math.sin(a) * 0.5;
+    legs.push({ lg, a });
+  }
+  g.visible = false; root.add(g);
+  return { g, body, jaw, eyes, legs };
+})();
+function monsterView(tr, dt, t) {
+  const m = tr && tr.monster;
+  const M = gobbler;
+  if (!m || m.state === 'away' || m.state === 'gone') { M.g.visible = false; return; }
+  M.g.visible = true;
+  const walking = m.state === 'walk' || m.state === 'leave';
+  M.g.position.set(m.x, m.y, HATCH_Z);
+  M.g.rotation.y = 0.95;                         // three-quarters on, heading right
+  M.body.position.y = walking ? Math.abs(Math.sin(t * 7)) * 0.08 : 0;
+  M.body.rotation.z = walking ? Math.sin(t * 7) * 0.06 : 0;
+  const chomping = m.state === 'eat' && m.t < 1.4;
+  M.jaw.rotation.x = chomping ? Math.max(0, Math.sin(m.t * 14)) * 0.9 : m.state === 'emerge' || m.state === 'fall' ? 0.6 : 0.12 + Math.sin(t * 2) * 0.08;
+  M.body.scale.setScalar(m.state === 'eat' && m.t < 0.7 ? 1 + Math.sin(m.t * 4.5) * 0.15 : 1);
+  M.eyes.forEach((e, i) => { e.rotation.z = Math.sin(t * 2.3 + i * 1.7) * 0.35; e.rotation.x = Math.cos(t * 1.9 + i) * 0.25; });
+  M.legs.forEach(({ lg }, i) => { lg.rotation.x = walking ? Math.sin(t * 10 + i * 1.3) * 0.5 : Math.sin(t * 3 + i) * 0.1; });
+  if (m.state === 'fall') M.g.rotation.z = Math.min(1.2, m.t * 1.5);
+  else M.g.rotation.z = 0;
+}
+function hatchView(dt) {
+  for (const h of hatchViews) {
+    h.open += (h.target - h.open) * Math.min(1, dt * 7);
+    h.hinge.rotation.x = -h.open * 1.9;
+    h.hole.visible = h.open > 0.05;
+    if (h.glowT > 0) { h.glowT -= dt; h.glow.intensity = 30 * Math.max(0, Math.sin(Math.min(1, h.glowT / 2.5) * Math.PI)); }
+    else h.glow.intensity = 0;
+  }
+  if (manhole) { manhole.cover.position.x += ((manhole.open ? 1.0 : 0) - manhole.cover.position.x) * Math.min(1, dt * 5); }
+}
+function monsterEvent(ev, L) {
+  const h = hatchViews[0];
+  if (ev.what === 'emerge') { if (manhole) manhole.open = 1; sfx.growl(); puff(MONSTER_X, L.groundAt(0), HATCH_Z, 8, 0.7, 0x4a5a3a); }
+  else if (ev.what === 'roar') { sfx.growl(); if (typeof shout === 'function') shout('GRRRAAAWWW!', MONSTER_X + 0.5, 2.6, 'monster', HATCH_Z); }
+  else if (ev.what === 'trapped') {
+    if (h) h.target = 1;
+    sfx.thunk(); sfx.growl();
+    if (typeof shout === 'function') shout('TRAPPED!', ev.x, 2.6, 'bonus', HATCH_Z);
+  } else if (ev.what === 'portal') {
+    if (h) { h.glowT = 2.5; setTimeout(() => { h.target = 0; }, 1600); }
+    sfx.portal();
+    for (let i = 0; i < 4; i++) puff(ev.x, L.groundAt(ev.x) + 0.1 + i * 0.3, HATCH_Z, 5, 0.7, 0xb04dff);
+    if (typeof shout === 'function') shout('Sent back to the Underneath!', ev.x, 2.9, 'monster', HATCH_Z);
+  } else if (ev.what === 'chomp') {
+    sfx.chomp();
+    if (typeof shout === 'function') { const l = shout('CHOMP!', ev.x, 2.8, 'sued', HATCH_Z); }
+    setTimeout(() => { if (typeof shout === 'function') shout('Burp.', ev.x - 0.8, 2.3, 'monster', HATCH_Z); }, 1400);
+  } else if (ev.what === 'hired') {
+    if (typeof shout === 'function') { const l = shout(`Jeff from the agency · ${fmt(NEW_BUILDER)}`, (L.startX ?? L.W + 2) + 5, 2.6, 'bonus'); if (l) l.life = 3; }
+  }
+}
+function resetMonsterView() {
+  gobbler.g.visible = false;
+  for (const h of hatchViews) { h.open = h.target = 0; h.glowT = 0; h.hinge.rotation.x = 0; h.hole.visible = false; h.glow.intensity = 0; }
+  if (manhole) { manhole.open = 0; manhole.cover.position.x = 0; }
+}
+const kevin = makePerson('agency'); kevin.visible = false; root.add(kevin);
+
 function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p: null, rant: 0 }); sheilaMesh.visible = false; }
 
 function resetPolice() {

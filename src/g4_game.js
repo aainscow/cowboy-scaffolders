@@ -57,6 +57,9 @@ const sfx = (() => {
     wah() { [[311, 0], [293, 0.32], [277, 0.64], [262, 0.96]].forEach(([f, w], i) => tone(f, i === 3 ? 1.1 : 0.34, { type: 'sawtooth', gain: 0.1, when: w, slide: i === 3 ? 180 : null, attack: 0.03 })); },
     harp() { [523, 659, 784, 1046, 1318, 1568, 2093].forEach((f, i) => tone(f, 1.2, { type: 'sine', gain: 0.11, when: i * 0.07 })); tone(262, 2, { type: 'triangle', gain: 0.06, when: 0.1 }); },
     nag() { const b = 330 + Math.random() * 90; for (let i = 0; i < 3; i++) tone(b * (1 + i * 0.12), 0.11, { type: 'sawtooth', gain: 0.05, when: i * 0.12, slide: b * 0.8, attack: 0.01 }); },
+    growl() { tone(70, 1.1, { type: 'sawtooth', gain: 0.22, slide: 45, attack: 0.08 }); tone(104, 0.9, { type: 'square', gain: 0.06, slide: 60, attack: 0.1 }); noise(1.0, { gain: 0.25, freq: 380, q: 2, type: 'bandpass', sweep: 180 }); },
+    chomp() { for (let i = 0; i < 3; i++) { noise(0.08, { gain: 0.5, freq: 900, type: 'bandpass', when: i * 0.22 }); tone(160, 0.12, { type: 'square', gain: 0.12, slide: 70, when: i * 0.22 }); } tone(90, 0.5, { type: 'sine', gain: 0.35, slide: 40, when: 0.75 }); },
+    portal() { tone(220, 1.6, { type: 'sine', gain: 0.12, slide: 1400, attack: 0.3 }); tone(330, 1.6, { type: 'triangle', gain: 0.06, slide: 2100, attack: 0.3 }); noise(1.6, { gain: 0.2, type: 'bandpass', freq: 300, q: 3, sweep: 5000 }); },
     glass() { noise(0.25, { gain: 0.35, type: 'highpass', freq: 4000 }); for (let i = 0; i < 6; i++) tone(2500 + Math.random() * 3000, 0.25, { gain: 0.05, when: Math.random() * 0.2 }); },
     splat() { noise(0.2, { gain: 0.5, freq: 700 }); tone(90, 0.25, { type: 'sine', gain: 0.4, slide: 40 }); tone(420, 0.12, { type: 'square', gain: 0.05, slide: 150, when: 0.05 }); },
     siren() { for (let i = 0; i < 6; i++) { tone(960, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9, attack: 0.05 }); tone(720, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9 + 0.45, attack: 0.05 }); } },
@@ -219,6 +222,7 @@ const ICON = {
   ladder: '<svg viewBox="0 0 34 34" fill="none" stroke="#dfe4e8" stroke-width="2.4" stroke-linecap="round"><path d="M11 3v28M23 3v28M11 8h12M11 14h12M11 20h12M11 26h12"/></svg>',
   lock: '<svg viewBox="0 0 34 34"><path d="M11 3v28M23 3v28" stroke="#dfe4e8" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="15" width="18" height="15" rx="1.5" fill="#f3d40b"/><path d="M8 20l6-5M8 27l12-12M14 30l12-10" stroke="#161b21" stroke-width="2"/><rect x="21" y="9" width="7" height="6" rx="1" fill="#d4a843"/><path d="M22.5 9V7a2 2 0 0 1 4 0v2" stroke="#d4a843" stroke-width="1.6" fill="none"/></svg>',
   trap: '<svg viewBox="0 0 34 34"><rect x="3" y="12" width="28" height="10" rx="1" fill="#c99a58"/><path d="M3 15h28M3 18.5h28" stroke="#8a6230" stroke-width=".8"/><path d="M15 12l3 4-3 2 4 4" stroke="#d7312a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  hatch: '<svg viewBox="0 0 34 34"><rect x="3" y="10" width="28" height="18" rx="1" fill="#1a0f22"/><rect x="3" y="4" width="28" height="9" rx="1" fill="#a8743f" transform="skewX(-12) translate(3 0)"/><circle cx="12" cy="22" r="2.6" fill="#fff27a"/><circle cx="12.5" cy="22.3" r="1.1" fill="#111"/><circle cx="20" cy="21" r="2.2" fill="#fff27a"/><circle cx="20.4" cy="21.3" r="0.9" fill="#111"/></svg>',
   protect: '<svg viewBox="0 0 34 34"><rect x="6" y="5" width="22" height="24" fill="#2a3440" stroke="#f6f5f0" stroke-width="2"/><rect x="4" y="8" width="26" height="18" rx="1" fill="#d9b27a" transform="rotate(-8 17 17)"/><g fill="#6b4e2e"><circle cx="8" cy="12" r="1.2"/><circle cx="27" cy="9" r="1.2"/><circle cx="8" cy="26" r="1.2"/><circle cx="28" cy="23" r="1.2"/></g></svg>',
   order: '<svg viewBox="0 0 34 34"><circle cx="9" cy="9" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="9" y="12.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">1</text><circle cx="25" cy="25" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="25" y="28.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">2</text><path d="M13 13l8 8" stroke="#f3d40b" stroke-width="2.2" stroke-linecap="round"/><path d="M21 16v5h-5" stroke="#f3d40b" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
 };
@@ -230,6 +234,7 @@ const TOOLS = [
   { id: 'ladder', name: 'Ladder', price: `£${LADDER.cost}/m · up to ${LADDER.maxLen} m`, key: '5' },
   { id: 'lock', name: 'Ladder lock', price: `£${LOCK.cost} · keeps chavs off`, key: '6', req: 'chavs' },
   { id: 'trap', name: 'Trap board', price: `£${BOARDS.trap.cost}/m · gives way under anyone`, key: 't', req: 'chavs' },
+  { id: 'hatch', name: 'Trap door', price: `£${HATCH.cost} · for the Drain Gobbler`, key: 'h', req: 'monster' },
   { id: 'protect', name: 'Board up', price: `£${BOARDUP.cost} a window · glazier £${GLAZIER}`, key: '0' },
   { id: 'tie', name: 'Wall tie', price: `£${TIE.cost} each`, key: '7' },
   { id: 'order', name: 'Build order', price: 'Click pieces in order', key: '8' },
@@ -240,7 +245,7 @@ function renderTools() {
   const el = $('tools');
   el.innerHTML = TOOLS.map(t => {
     const dis = (t.req && !L[t.req]) || (t.id === 'tie' && L.maxTies === 0);
-    const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : 'Later jobs') : t.price;
+    const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : t.id === 'hatch' ? 'Nothing in the drains here' : 'Later jobs') : t.price;
     return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
   }).join('') + `<hr><div class="mini"><button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button><button id="clearBtn" title="Remove everything">Clear</button></div><div class="mini"><button id="orderBtn" class="${S.showOrder ? 'on' : ''}" title="List the order the crew puts pieces up, and change it">Order list</button></div>`;
   el.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setTool(b.dataset.tool); }));
@@ -349,9 +354,10 @@ function updateHelp() {
     ladder: '<b>Click</b> the foot (ground or a boarded platform), then the top. The top must land on boards. Dave only climbs ladders.',
     trap: `<b>Click or drag</b> along a tube to lay a fake board. It looks real but gives way under anyone. A chav who drops ${SAFE_FALL} m or less lies there dazed and the police pay ${fmt(TRAP_REWARD)} for them. Any higher and you get sued. Dave avoids trap boards if there's another way up.`,
     protect: `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${GLAZIER} glazier). Windows marked ⚠ are in the firing line.`,
+    hatch: `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
     lock: '<b>Click</b> any ladder to lock it. Chavs can\'t climb locked ladders, and Dave has the key.',
     order: '<b>Click pieces in the order you want them put up</b>, starting from #1. Anything you don\'t click keeps its place after. Use the order list to fine-tune.',
-    erase: '<b>Click</b> a tube, board, ladder, lock or tie to remove it.',
+    erase: '<b>Click</b> a tube, board, ladder, lock, tie or trap door to remove it.',
   }[S.tool];
   $('help').innerHTML = h + '<br><b>Drag empty space</b> to pan · <b>right-drag</b> to orbit · <b>wheel</b> to zoom · <b>Ctrl+Z</b> undo';
 }
@@ -379,6 +385,7 @@ function afterEdit() {
   save.d.designs[L.id] = S.pieces;
   save.write();
   syncBoardUps(L, S.pieces);
+  syncHatches(L, S.pieces);
   refreshRiskLabels();
   refreshDocket();
   refreshOrderLabels();
@@ -439,6 +446,7 @@ function refreshDocket() {
   if (L.chavs) items.push(['info', unlocked ? `${unlocked} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : 'Ladders locked: chavs stay on the ground']);
   const unprot = [...(S.risk || [])].filter(i => !S.pieces.some(p => p.type === 'protect' && p.a[0] === i)).length;
   if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? 'Windows in the firing line boarded' : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${GLAZIER} each if smashed`]);
+  if (L.monster) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
   items.push([frac <= 1, frac <= 1 ? `Under the quote by ${fmt(L.budget - cost)}` : `Over the quote by ${fmt(cost - L.budget)}`]);
   $('checks').innerHTML = items.map(([ok, t]) => `<li class="${ok === 'info' ? 'info' : ok ? 'ok' : ''}">${t}</li>`).join('');
   const b = $('buildBtn');
@@ -500,6 +508,7 @@ function pieceAt(pt) {
     if (p.type === 'tie') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.12;
     else if (p.type === 'protect') { const w = S.L.house.windows[p.a[0]]; d = w ? Math.hypot(pt.x - w.x - w.w / 2, pt.y - w.y - w.h / 2) - 0.45 : 9; }
     else if (p.type === 'lock') d = Math.hypot(pt.x - p.a[0] - LAD_OFF, pt.y - p.a[1] - 0.75) - 0.35;
+    else if (p.type === 'hatch') d = pt.y < p.a[1] + 0.8 ? Math.abs(pt.x - p.a[0]) - 0.45 : 9;
     else if (p.type === 'ladder') d = segDist(pt.x, pt.y, p.a[0] + LAD_OFF, p.a[1], p.b[0] + LAD_OFF, p.b[1] + 1) - 0.1;
     else if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') d = segDist(pt.x, pt.y, p.a[0] + 0.1, p.a[1] + 0.14, p.b[0] - 0.1, p.b[1] + 0.14) - 0.05;
     else d = segDist(pt.x, pt.y, p.a[0], p.a[1], p.b[0], p.b[1]);
@@ -699,6 +708,9 @@ window.addEventListener('pointerup', (ev) => {
         refreshOrderLabels();
       }
     }
+  } else if (tool === 'hatch' && moved < 8) {
+    const x = Math.max(0, Math.min(S.L.W, Math.round(pt.x)));
+    tryPlace({ type: 'hatch', a: [x, S.L.groundCol(x)] });
   } else if (tool === 'protect' && moved < 8) {
     const i = windowAt(pt);
     if (i >= 0) tryPlace({ type: 'protect', a: [i, 0] }); else toast('Click a window to board it up');
@@ -792,6 +804,11 @@ function updateDesignHover() {
       hiPieces = new Set([S.pieces.indexOf(l)]);
       setTip(err || `Lock this ladder · ${fmt(LOCK.cost)}`, !!err, pt.x, pt.y);
     }
+  } else if (tool === 'hatch') {
+    const x = Math.max(0, Math.min(S.L.W, Math.round(pt.x)));
+    const err = validatePlacement(S.L, S.pieces, { type: 'hatch', a: [x, S.L.groundCol(x)] });
+    hoverRing.visible = true; hoverRing.position.set(x, S.L.groundCol(x), Z_OUT + 0.02); hoverRing.material.color.set(err ? 0xff4d3a : 0xb04dff);
+    setTip(err || `Trap door · ${fmt(HATCH.cost)} · drops the Drain Gobbler into the secret basement`, !!err, x, S.L.groundCol(x) + 0.6);
   } else if (tool === 'protect') {
     const i = windowAt(pt);
     if (i >= 0) {
@@ -857,6 +874,7 @@ function loadLevel(i) {
   const chips = [];
   if (L.wind) chips.push(`<span class="chip warn">Wind: ${L.wind + L.gust > 35 ? 'strong gusts' : 'breezy'}</span>`);
   if (L.chavs) chips.push(`<span class="chip bad">Chavs: ${L.chavs}</span>`);
+  if (L.monster) chips.push('<span class="chip bad">Something in the drains</span>');
   if (L.maxTies === 0) chips.push('<span class="chip bad">No ties</span>');
   else if (L.maxTies < 99) chips.push(`<span class="chip">Max ${L.maxTies} ties</span>`);
   if (L.heavy) chips.push('<span class="chip">Heavy tube</span>');
@@ -878,6 +896,7 @@ function openBrief() {
   const loads = L.deliveries.map(d => `<span>${ITEMS[d.item].name}</span><span class="kg num">${kg(ITEMS[d.item].mass)}</span><span class="at num">${L.zones[d.zone].y} m up</span>`).join('');
   const facts = [`<span class="chip">Quote ${fmt(L.budget)}</span>`];
   if (L.chavs) facts.push(`<span class="chip bad">Chavs: ${L.chavs}</span>`);
+  if (L.monster) facts.push('<span class="chip bad">Something in the drains</span>');
   if (L.wind) facts.push(`<span class="chip warn">Wind: ${L.wind + L.gust > 35 ? 'strong gusts' : 'breezy'}</span>`);
   if (L.maxTies === 0) facts.push('<span class="chip bad">No wall ties</span>'); else if (L.maxTies < 99) facts.push(`<span class="chip">Max ${L.maxTies} wall ties</span>`);
   if (L.heavy) facts.push('<span class="chip">Heavy tube unlocked</span>');
@@ -892,6 +911,7 @@ function openBrief() {
     <p class="tipline">${L.tip}</p>
     ${S.risk && S.risk.size ? `<p class="tipline">Anything over ${WINDOW_BREAK_KG} kg dumped in front of a window puts a brick through it: £${GLAZIER} to the glazier, or £${BOARDUP.cost} to board it up first. ${S.risk.size} window${S.risk.size > 1 ? 's are' : ' is'} in the firing line on this job.</p>` : ''}
     ${L.chavs ? `<p class="tipline chav">After Dave's done, ${L.chavs > 1 ? L.chavs + ' local lads' : 'a local lad'} will turn up to swing on your tubes and climb any ladder that isn't locked. Every tag on the house costs ${fmt(TAG_COST)} to clean off. You don't have to lock them out: lay <b>trap boards</b> where they'll walk. A chav who drops ${SAFE_FALL} m or less gets carted off by the police, who pay ${fmt(TRAP_REWARD)} each. Drop one further than that and you get sued.</p>` : ''}
+    ${L.monster ? `<p class="tipline chav">There's something living in the drains round here. After dark the <b>Drain Gobbler</b> crawls out of the manhole and goes looking for Dave. Dig a <b>trap door</b> (${fmt(HATCH.cost)}) in the pavement and it drops into the secret basement and gets sent back to the Underneath. No trap door and it eats Dave, and the agency charges ${fmt(NEW_BUILDER)} to send Jeff.</p>` : ''}
     <p class="terry"><b>Big Terry:</b> “${TERRY[L.id - 1]}”</p>
     <div class="row"><button class="big ghost" id="briefBack">Job sheet</button><button class="big" id="briefGo">${S.pieces.length ? 'Back to it' : 'Start the job'}</button></div>`;
   hudDesign(false);
@@ -918,6 +938,7 @@ function enterDesign() {
   clearPeopleFx();
   resetPolice();
   resetSheila();
+  resetMonsterView(); kevin.visible = false;
   if (sceneDirty) { const hl = labels.filter(l => l.group === 'design'); buildLevelScene(S.L); }
   S.dusk = 0;
   afterEdit();
@@ -965,6 +986,7 @@ function startTest() {
   clearPeopleFx();
   resetPolice();
   resetSheila();
+  resetMonsterView(); kevin.visible = false;
   S.chain = null;
   hoverRing.visible = startRing.visible = previewTube.visible = previewBoard.visible = false;
   tipLabel.visible = false;
@@ -1003,6 +1025,11 @@ function testStatus() {
   const b = tr.builder;
   const it = b.carrying ? `${b.carrying.def.name.toLowerCase()} (${kg(b.carrying.def.mass)})` : '';
   if (tr.result && !tr.result.ok) return status(tr.result.sued ? 'Sued' : 'Collapse', tr.result.reason, true);
+  if (tr.phase === 'monster' && tr.monster) {
+    const st = tr.monster.state;
+    const msg = { emerge: "Something's crawling out of the drain…", walk: "The Drain Gobbler's heading for Dave!", fall: 'TRAPPED! Down into the secret basement it goes', gone: 'Sent back to the Underneath. Good riddance.', eat: "It's eaten Dave!", leave: `The agency's sending Jeff (${fmt(NEW_BUILDER)})` }[st] || '';
+    return status('Midnight', msg, st === 'eat');
+  }
   if (tr.phase === 'chavs') {
     const cs = tr.chavs.filter(c => c.visible && c.state !== 'gone');
     const tags = (S.windows ? ` · ${S.windows} window${S.windows > 1 ? 's' : ''} smashed` : '') + (tr.tags.length ? ` · ${tr.tags.length} tag${tr.tags.length > 1 ? 's' : ''} (${fmt(tr.tags.length * TAG_COST)} clean-up)` : '');
@@ -1038,7 +1065,8 @@ function showResult() {
   const smashed = (tr.result && tr.result.ok) ? (S.windows || 0) : 0;
   const trappedN = (tr.result && tr.result.trapped) || 0;
   const reward = (tr.result && tr.result.ok) ? trappedN * TRAP_REWARD : 0;
-  const cost = materials + tags * TAG_COST + smashed * GLAZIER - reward;
+  const eaten = !!(tr.result && tr.result.ok && tr.result.eaten);
+  const cost = materials + tags * TAG_COST + smashed * GLAZIER + (eaten ? NEW_BUILDER : 0) - reward;
   const stood = tr.result && tr.result.ok && !tr.unfinished;
   const unfinished = tr.result && tr.result.ok && tr.unfinished;
   const sued = tr.result && tr.result.sued;
@@ -1053,11 +1081,11 @@ function showResult() {
     sfx.fanfare();
   } else sfx.wah();
   const next = S.li + 1 < LEVELS.length;
-  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed) && materials <= L.budget ? `It stood, but ${smashed ? `the glazier (${fmt(smashed * GLAZIER)})` : ''}${smashed && tags ? ' and ' : ''}${tags ? `the graffiti clean-up (${fmt(tags * TAG_COST)})` : ''} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
+  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed || eaten) && materials <= L.budget ? `It stood, but ${[smashed && `the glazier (${fmt(smashed * GLAZIER)})`, tags && `the graffiti clean-up (${fmt(tags * TAG_COST)})`, eaten && `hiring Jeff after Dave got eaten (${fmt(NEW_BUILDER)})`].filter(Boolean).join(' and ')} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
   const band = ok ? ['Safe for use*', '*as far as Terry knows'] : unfinished ? ['Not finished', 'No platform, no pay'] : sued ? ['Sued', 'See you in court'] : stood ? ['Not paid', 'Over the quote'] : ['Do not use', 'Scaffold incomplete'];
   const kills = trappedN;
   if (kills) { save.d.chavKills = (save.d.chavKills || 0) + kills; save.write(); }
-  const daveLine = tr.result && tr.result.daveDown ? "Deceased (it's what he'd have wanted)" : 'Dave (signed with an X)';
+  const daveLine = tr.result && tr.result.daveDown ? "Deceased (it's what he'd have wanted)" : eaten ? 'Jeff (from the agency)' : 'Dave (signed with an X)';
   $('result').innerHTML = `<div class="tag ${ok ? 'good' : sued ? 'sued' : 'bad'}">
     <div class="band"><div class="big1">${band[0]}</div><div class="small1">${band[1]}</div></div>
     <div class="fields">
@@ -1065,6 +1093,8 @@ function showResult() {
       <span class="k">Materials</span><span class="v num">${fmt(materials)}</span>
       ${reward ? `<span class="k">Police reward</span><span class="v num bonus">+${fmt(reward)} (${trappedN} chav${trappedN > 1 ? 's' : ''})</span>` : ''}
       ${smashed ? `<span class="k">Glazier</span><span class="v num">${fmt(smashed * GLAZIER)} (${smashed} window${smashed > 1 ? 's' : ''})</span>` : ''}
+      ${eaten ? `<span class="k">New builder</span><span class="v num">${fmt(NEW_BUILDER)} (Dave got eaten)</span>` : ''}
+      ${tr.result && tr.result.monsterTrapped ? `<span class="k">Drain Gobbler</span><span class="v bonus">Back in the Underneath</span>` : ''}
       ${tags ? `<span class="k">Graffiti</span><span class="v num">${fmt(tags * TAG_COST)} (${tags} tag${tags > 1 ? 's' : ''})</span>` : ''}
       <span class="k">Quote</span><span class="v num">${fmt(L.budget)}</span>
       ${ok ? `<span class="k">Profit</span><span class="v num">${fmt(L.budget - cost)}</span>` : `<span class="k">Reason</span><span class="v">${reason}</span>`}
@@ -1111,6 +1141,7 @@ function stepTest(dt) {
     const ev = tr.events[S.evI];
     if (ev.type === 'tag') { addTagDecal(ev.tag, tagDecals.length); shout('TAGGED!', ev.tag.x, ev.tag.y + 0.6); }
     else if (ev.type === 'splat') { sfx.splat(); }
+    else if (ev.type === 'monster') monsterEvent(ev, S.L);
     else if (ev.type === 'angry') { shout('OI!! 😡', ev.x, ev.y + 2.2); }
     if (ev.type === 'land') {
       const it = ev.item;
@@ -1196,7 +1227,7 @@ function stepTest(dt) {
     if (!c._sprayed) { c._sprayed = true; sfx.spray(); }
   }
   // dusk falls when the chavs come out
-  const duskT = tr.phase === 'chavs' || (S.L.chavs && (tr.phase === 'hold' || tr.phase === 'done' || tr.phase === 'failing') && tr.deliv >= S.L.deliveries.length) ? 1 : 0;
+  const duskT = tr.phase === 'chavs' || tr.phase === 'monster' || (S.L.chavs && (tr.phase === 'hold' || tr.phase === 'done' || tr.phase === 'failing') && tr.deliv >= S.L.deliveries.length) ? 1 : 0;
   S.dusk = (S.dusk || 0) + (duskT - (S.dusk || 0)) * Math.min(1, dt * S.speed * 0.4);
   if (tr.phase === 'done') {
     S.resultT += dt;
@@ -1262,7 +1293,10 @@ function renderTrial(dt) {
       m.rotation.set(0, 0, it.rot || 0);
     }
   }
-  animatePerson(dave, tr.builder, dt, S.t);
+  const agency = tr.builder.who === 'agency';
+  if (agency) dave.visible = false; else kevin.visible = false;
+  animatePerson(agency ? kevin : dave, tr.builder, dt, S.t);
+  monsterView(tr, dt, S.t);
   tr.chavs.forEach((c, i) => { if (!c.nicked) animatePerson(chavMesh(i), c, dt, S.t); });
   for (let i = tr.chavs.length; i < chavMeshes.length; i++) chavMeshes[i].visible = false;
   // wind noise + visuals
@@ -1419,6 +1453,7 @@ function frameBody(now) {
   updateDebris(dt);
   updateGhosts(dt, S.t);
   updatePolice(dt, S.t);
+  hatchView(dt);
   updateSheila(dt, S.t, S.mode === 'test' && S.trial ? { x: dave.position.x, y: dave.position.y, visible: dave.visible } : null);
   for (const d of tagDecals) { d.t += dt; d.m.material.opacity = Math.min(1, d.t / 0.6); }
   const dk = S.mode === 'test' ? (S.dusk || 0) : 0;
