@@ -56,6 +56,7 @@ const sfx = (() => {
     fanfare() { [523, 659, 784, 1046].forEach((f, i) => { tone(f, 0.35, { type: 'triangle', gain: 0.22, when: i * 0.11 }); tone(f * 2, 0.2, { type: 'sine', gain: 0.05, when: i * 0.11 }); }); tone(1046, 0.9, { type: 'triangle', gain: 0.18, when: 0.45 }); tone(1318, 0.9, { type: 'triangle', gain: 0.12, when: 0.45 }); },
     wah() { [[311, 0], [293, 0.32], [277, 0.64], [262, 0.96]].forEach(([f, w], i) => tone(f, i === 3 ? 1.1 : 0.34, { type: 'sawtooth', gain: 0.1, when: w, slide: i === 3 ? 180 : null, attack: 0.03 })); },
     harp() { [523, 659, 784, 1046, 1318, 1568, 2093].forEach((f, i) => tone(f, 1.2, { type: 'sine', gain: 0.11, when: i * 0.07 })); tone(262, 2, { type: 'triangle', gain: 0.06, when: 0.1 }); },
+    nag() { const b = 330 + Math.random() * 90; for (let i = 0; i < 3; i++) tone(b * (1 + i * 0.12), 0.11, { type: 'sawtooth', gain: 0.05, when: i * 0.12, slide: b * 0.8, attack: 0.01 }); },
     glass() { noise(0.25, { gain: 0.35, type: 'highpass', freq: 4000 }); for (let i = 0; i < 6; i++) tone(2500 + Math.random() * 3000, 0.25, { gain: 0.05, when: Math.random() * 0.2 }); },
     splat() { noise(0.2, { gain: 0.5, freq: 700 }); tone(90, 0.25, { type: 'sine', gain: 0.4, slide: 40 }); tone(420, 0.12, { type: 'square', gain: 0.05, slide: 150, when: 0.05 }); },
     siren() { for (let i = 0; i < 6; i++) { tone(960, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9, attack: 0.05 }); tone(720, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9 + 0.45, attack: 0.05 }); } },
@@ -916,6 +917,7 @@ function enterDesign() {
   for (const m of chavMeshes) m.visible = false;
   clearPeopleFx();
   resetPolice();
+  resetSheila();
   if (sceneDirty) { const hl = labels.filter(l => l.group === 'design'); buildLevelScene(S.L); }
   S.dusk = 0;
   afterEdit();
@@ -962,6 +964,7 @@ function startTest() {
   S.acc = 0; S.logI = 0; S.evI = 0; S.lastIdx = -1; S.resultT = 0; S.zoff = []; S.dusk = 0; S.policeWait = 0;
   clearPeopleFx();
   resetPolice();
+  resetSheila();
   S.chain = null;
   hoverRing.visible = startRing.visible = previewTube.visible = previewBoard.visible = false;
   tipLabel.visible = false;
@@ -1202,9 +1205,10 @@ function stepTest(dt) {
   }
   testStatus();
 }
-function shout(text, x, y, cls = '') {
-  const l = addLabel('shout ' + cls, text, x, y, Z_OUT + 0.5, 'fx');
+function shout(text, x, y, cls = '', z = Z_OUT + 0.5) {
+  const l = addLabel('shout ' + cls, text, x, y, z, 'fx');
   l.born = S.t;
+  return l;
 }
 
 function renderTrial(dt) {
@@ -1407,13 +1411,15 @@ function frameBody(now) {
     if (l.group === 'fx' && l.born !== undefined) {
       const age = S.t - l.born;
       l.pos.y += dt * 0.6;
-      l.el.style.opacity = Math.max(0, 1 - age / 1.4);
-      if (age > 1.4) { l.el.remove(); labels.splice(i, 1); }
+      const life = l.life || 1.4;
+      l.el.style.opacity = l.life ? Math.max(0, Math.min(1, (life - age) / 0.5)) : Math.max(0, 1 - age / 1.4);
+      if (age > life) { l.el.remove(); labels.splice(i, 1); }
     }
   }
   updateDebris(dt);
   updateGhosts(dt, S.t);
   updatePolice(dt, S.t);
+  updateSheila(dt, S.t, S.mode === 'test' && S.trial ? { x: dave.position.x, y: dave.position.y, visible: dave.visible } : null);
   for (const d of tagDecals) { d.t += dt; d.m.material.opacity = Math.min(1, d.t / 0.6); }
   const dk = S.mode === 'test' ? (S.dusk || 0) : 0;
   sun.intensity = 3.3 - 2.0 * dk; sun.color.copy(SUN_DAY).lerp(SUN_DUSK, dk);

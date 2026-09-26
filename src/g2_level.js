@@ -82,6 +82,7 @@ function smashGlass(b) {
   }
   b.glassBroken = true; sceneDirty = true;
   sfx.glass();
+  sheilaSmash(currentLevel(), b.x);
   return true;
 }
 // Plywood over the windows the player has boarded up.

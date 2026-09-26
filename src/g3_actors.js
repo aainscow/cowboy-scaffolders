@@ -180,6 +180,7 @@ const STYLES = {
   chav1: { top: 0x24398a, sleeve: 0x24398a, legs: 0x24398a, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0x141414, skin: 0x8d5a3b, stripe: 0xffffff, can: 0x2dff6a },
   chav2: { top: 0xa1a7ad, sleeve: 0xa1a7ad, legs: 0x5e6369, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xd8c690, skin: 0xf2c9a8, stripe: 0x111111, can: 0x2dc8ff },
   police: { top: 0xc8f000, vest: true, glow: 0x88aa00, sleeve: 0x1b2233, legs: 0x1b2233, shoe: 0x111111, hat: 'police', hatCol: 0x141c2e, skin: 0xe8b996 },
+  sheila: { top: 0xf2a7c3, sleeve: 0xf2a7c3, legs: 0xf6dfe6, shoe: 0xff8fbf, hat: 'curlers', hatCol: 0x9a6a44, skin: 0xf0c4a4, gown: 0xf2a7c3, trim: 0xfff4f7 },
   chav3: { top: 0x161616, sleeve: 0x161616, legs: 0x161616, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xb0122a, skin: 0xd79e7a, stripe: 0xffffff, can: 0xffd12d },
 };
 const personMats = {};
@@ -192,6 +193,7 @@ function pmats(key) {
     sleeve: std(st.sleeve, 0.8), legs: std(st.legs, 0.8), shoe: std(st.shoe, 0.6), hat: std(st.hatCol, 0.35),
     refl: new THREE.MeshStandardMaterial({ color: 0xe9eef2, metalness: 0.7, roughness: 0.25 }),
     stripe: st.stripe ? std(st.stripe, 0.6) : null, can: st.can ? std(st.can, 0.3, { metalness: 0.6 }) : null,
+    gown: st.gown ? std(st.gown, 0.95) : null, trim: st.trim ? std(st.trim, 1) : null,
     eye: new THREE.MeshBasicMaterial({ color: 0x1a1a1a }),
   });
 }
@@ -200,6 +202,15 @@ function addHat(parent, st, mt, part) {
     const h = part(new THREE.SphereGeometry(0.14, 16, 12), mt.hat, 0, 0.12, 0, parent); h.scale.set(1, 1.55, 1.05);
     part(new THREE.CylinderGeometry(0.15, 0.15, 0.03, 16), mt.hat, 0, 0.04, 0, parent);
     part(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshStandardMaterial({ color: 0xdfe4e8, metalness: 0.9, roughness: 0.2 }), 0, 0.17, 0.13, parent);
+  } else if (st.hat === 'curlers') {
+    // a perm in progress: hair plus a row of rollers
+    part(new THREE.SphereGeometry(0.14, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), mt.hat, 0, 0.0, -0.01, parent).scale.set(1.05, 1.1, 1.08);
+    const roller = new THREE.MeshStandardMaterial({ color: 0x7fd0ff, roughness: 0.4 });
+    for (let i = 0; i < 5; i++) {
+      const a = -1.0 + i * 0.5;
+      const r = part(new THREE.CylinderGeometry(0.032, 0.032, 0.11, 10), roller, Math.sin(a) * 0.12, 0.1 + Math.cos(a) * 0.02, Math.cos(a) * 0.05 - 0.02, parent);
+      r.rotation.z = Math.PI / 2;
+    }
   } else if (st.hat === 'hard') {
     part(new THREE.SphereGeometry(0.148, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), mt.hat, 0, 0.05, 0, parent).scale.set(1, 0.95, 1.08);
     part(new THREE.CylinderGeometry(0.17, 0.17, 0.018, 20), mt.hat, 0, 0.055, 0.03, parent).scale.set(1, 1, 1.12);
@@ -224,6 +235,12 @@ function makePerson(key) {
     part(new THREE.BoxGeometry(0.452, 0.045, 0.272), mt.refl, 0, 0.36, 0, torso);
     part(new THREE.BoxGeometry(0.05, 0.3, 0.272), mt.refl, -0.12, 0.52, 0.001, torso);
     part(new THREE.BoxGeometry(0.05, 0.3, 0.272), mt.refl, 0.12, 0.52, 0.001, torso);
+  } else if (mt.gown) {
+    // dressing gown: lapels, a belt, and a skirt down to the shins
+    part(new THREE.BoxGeometry(0.12, 0.4, 0.02), mt.trim, -0.06, 0.45, 0.13, torso).rotation.z = -0.25;
+    part(new THREE.BoxGeometry(0.12, 0.4, 0.02), mt.trim, 0.06, 0.45, 0.13, torso).rotation.z = 0.25;
+    part(new THREE.BoxGeometry(0.46, 0.05, 0.28), mt.trim, 0, 0.14, 0, torso);
+    part(new THREE.CylinderGeometry(0.2, 0.3, 0.62, 14, 1, true), mt.gown, 0, -0.3, 0, hips).material.side = THREE.DoubleSide;
   } else {
     part(new THREE.BoxGeometry(0.02, 0.5, 0.02), mt.stripe, 0, 0.38, 0.132, torso); // zip
     part(new THREE.BoxGeometry(0.2, 0.08, 0.28), mt.stripe, 0, 0.66, 0, torso).scale.set(1, 1, 0.97);
@@ -283,7 +300,7 @@ function animatePerson(g, p, dt, t) {
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
   const st = p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
-  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle'].includes(st) ? st : p.mode;
+  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
   const groundZ = isDave ? 2.4 : 2.55 + (p.id || 0) * 0.14;
   let x = p.x, y = p.y, zT = groundZ, yawT = p.face > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -357,6 +374,12 @@ function animatePerson(g, p, dt, t) {
     for (const a of u.arms) { a.sh.rotation.x = -3.05; }
     u.legs[0].hp.rotation.x = -0.3 - (p.swing || 0) * 0.5; u.legs[1].hp.rotation.x = -0.1 - (p.swing || 0) * 0.6;
     u.legs[0].kn.rotation.x = 0.5; u.legs[1].kn.rotation.x = 0.3;
+  } else if (mode === 'rant') {
+    // fist shaken up at Dave, other hand on hip, head going
+    u.arms[1].sh.rotation.x = -2.5 + Math.sin(t * 16) * 0.25; u.arms[1].sh.rotation.z = -0.25; u.arms[1].el.rotation.x = -0.6 + Math.sin(t * 16) * 0.3;
+    u.arms[0].sh.rotation.z = 0.7; u.arms[0].el.rotation.x = -1.6; u.arms[0].el.rotation.z = -0.6;
+    u.head.rotation.x = -0.35 + Math.sin(t * 7) * 0.08; u.head.rotation.z = Math.sin(t * 5) * 0.12;
+    u.torso.rotation.x = -0.12; u.body.position.y = Math.abs(Math.sin(t * 5)) * 0.03;
   } else if (mode === 'rattle') {
     for (const a of u.arms) { a.sh.rotation.x = -1.5 + Math.sin(t * 22) * 0.12; a.el.rotation.x = -0.2; }
     u.torso.rotation.x = 0.1 + Math.sin(t * 22) * 0.05;
@@ -882,6 +905,70 @@ function updatePolice(dt, t) {
   if (P.cop && P.cop.visible && P.state !== 'leave') { P.cop.y = L.groundAt(P.cop.x); animatePerson(officer, P.cop, dt, t); } else officer.visible = false;
   if (P.chav && !P.chav.gone && P.state === 'escort') animatePerson(P.chavMesh, P.chav, dt, t);
 }
+// ---------------------------------------------------------------------------
+//  Sheila: smash one of her windows and she's out the front door in her
+//  dressing gown to tell Dave exactly what she thinks of him.
+// ---------------------------------------------------------------------------
+const sheilaMesh = makePerson('sheila'); sheilaMesh.visible = false; root.add(sheilaMesh);
+const SHEILA_LINES = [
+  'DAVE!!', "THAT'S MY WINDOW!", "Who's paying for that?!", "I'm ringing Terry!", 'Forty years that glass lasted!',
+  'Look at the STATE of it!', "Don't you wave at me!", 'My Derek fitted that!', "I've got bingo tonight!", 'Cowboys, the lot of you!',
+  "I'm writing to the council!", 'And the paper!', 'Bricks in my BATH!',
+];
+const sheila = { active: false, state: 'idle', p: null, t: 0, rant: 0, lineT: 0, line: 0, level: null };
+function sheilaSmash(level, wx) {
+  const S2 = sheila;
+  if (!level || !level.house) return;
+  S2.rant = Math.min(22, (S2.active && S2.state !== 'in' ? S2.rant : 0) + 11);
+  if (S2.active && S2.state !== 'in') { S2.lineT = 0; return; }
+  const h = level.house;
+  const doorX = h.door ? h.door.x + h.door.w / 2 : h.x0 + 0.4;
+  if (!S2.p) S2.line = Math.floor(Math.random() * 3);
+  S2.p = { who: 'sheila', id: 0, visible: true, x: doorX, y: level.groundAt(doorX), z: 0.2, state: 'walk', mode: 'ground', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1 };
+  Object.assign(S2, { active: true, state: 'out', t: 0, lineT: 0.3, level, wx, doorX });
+  sheilaMesh.visible = true;
+}
+function updateSheila(dt, t, davePos) {
+  const S2 = sheila;
+  if (!S2.active) return;
+  const P = S2.p, L = S2.level, h = L.house;
+  const walk = (tx, tz, v) => {
+    const dx = tx - P.x, dz = tz - P.z, d = Math.hypot(dx, dz);
+    if (d < 0.05) return true;
+    const k = Math.min(1, v * dt / d);
+    P.x += dx * k; P.z += dz * k; P.face = Math.sign(dx) || P.face; P.yaw = Math.atan2(dx, dz);
+    return false;
+  };
+  S2.t += dt;
+  // where to stand: in front of the scaffold, under Dave (or the broken window)
+  const aimX = Math.max(h.x0 + 0.3, Math.min(h.x1 - 0.3, davePos && davePos.visible ? davePos.x : S2.wx));
+  if (S2.state === 'out') {
+    P.state = 'walk';
+    if (P.z < 3.1) walk(P.x, 3.4, 1.6);
+    else if (walk(aimX, 3.4, 1.6)) { S2.state = 'rant'; S2.lineT = 0; }
+  } else if (S2.state === 'rant') {
+    P.state = 'rant';
+    if (Math.abs(aimX - P.x) > 1.2) walk(aimX, 3.4, 1.4);        // follow him along
+    const tx = davePos && davePos.visible ? davePos.x : S2.wx;
+    P.yaw = Math.atan2(tx - P.x, Z_MID - P.z);   // square up to him
+    S2.rant -= dt; S2.lineT -= dt;
+    if (S2.lineT <= 0) {
+      const l = typeof shout === 'function' ? shout(SHEILA_LINES[S2.line % SHEILA_LINES.length], P.x, P.y + 2.3, 'sheila', P.z) : null;
+      if (l) l.life = 2.2;
+      S2.line++; S2.lineT = 2.0;
+      if (typeof sfx !== 'undefined' && sfx.nag) sfx.nag();
+    }
+    if (S2.rant <= 0) { S2.state = 'in'; const l = typeof shout === 'function' ? shout('HMPH!', P.x, P.y + 2.3, 'sheila', P.z) : null; if (l) l.life = 1.6; }
+  } else if (S2.state === 'in') {
+    P.state = 'walk';
+    if (Math.abs(P.x - S2.doorX) > 0.05 && P.z > 3) walk(S2.doorX, 3.4, 1.9);
+    else if (walk(S2.doorX, 0.1, 1.9)) { S2.active = false; S2.state = 'idle'; sheilaMesh.visible = false; if (typeof sfx !== 'undefined') sfx.thunk(); return; }
+  }
+  P.y = L.groundAt(P.x);
+  animatePerson(sheilaMesh, P, dt, t);
+}
+function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p: null, rant: 0 }); sheilaMesh.visible = false; }
+
 function resetPolice() {
   police.active = false; police.done = false; police.queue = []; police.state = 'idle';
   policeCar.visible = false; officer.visible = false;
