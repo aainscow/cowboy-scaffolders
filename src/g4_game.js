@@ -549,34 +549,48 @@ function toast(msg) {
 // pointer input
 const cvs = renderer.domElement;
 let downInfo = null;
+const touchesDown = new Set();
+// a second finger means the camera gesture (orbit/zoom) takes over: drop any one-finger pan
+function secondFinger() {
+  if (!downInfo) return;
+  downInfo.canPan = false; downInfo.panned = true;
+  S.drag = null; S.dragEnd = null; S.paint = null;
+}
+const forgetTouch = (ev) => { if (ev.pointerType === 'touch') touchesDown.delete(ev.pointerId); };
+window.addEventListener('pointercancel', (ev) => { forgetTouch(ev); if (!touchesDown.size) { S.drag = null; S.dragEnd = null; S.paint = null; downInfo = null; } });
 cvs.addEventListener('pointerdown', (ev) => {
   sfx.unlock();
+  if (ev.pointerType === 'touch') { touchesDown.add(ev.pointerId); if (touchesDown.size > 1) { secondFinger(); return; } }
+  // watching a job: a one-finger (or left-button) drag just moves the view
+  if (S.mode === 'test') {
+    if (ev.button === 0) downInfo = { x: ev.clientX, y: ev.clientY, lx: ev.clientX, ly: ev.clientY, canPan: true, viewOnly: true };
+    return;
+  }
   if (S.mode !== 'design') return;
   if (ev.button === 2) { downInfo = { x: ev.clientX, y: ev.clientY, right: true }; return; }
   if (ev.button !== 0) return;
-  if (ev.pointerType === 'touch' && !ev.isPrimary) return;
   const pt = pickLocal(ev);
-  if (!pt) return;
   downInfo = { x: ev.clientX, y: ev.clientY, lx: ev.clientX, ly: ev.clientY, mouse: ev.pointerType === 'mouse' };
+  if (!pt) { downInfo.canPan = true; return; }
   if (S.tool === 'tube' || S.tool === 'heavy') {
     if (!S.chain) {
       const n = nearestNode(pt);
       if (n && isStartable(n)) { S.drag = n; S.dragEnd = null; }
-      else if (n) toast('Start from the ground (orange dots) or an existing joint');
+      else if (n) downInfo.hint = 'Start from the ground (orange dots) or an existing joint';
     }
   } else if (S.tool === 'ladder') {
     if (!S.chain) {
       const n = nearestNode({ x: pt.x - LAD_OFF * 0.5, y: pt.y }, 0.6);
       if (n && ladderFootOk(n)) S.drag = n;
-      else if (n) toast('Stand ladders on the ground or on a boarded platform');
+      else if (n) downInfo.hint = 'Stand ladders on the ground or on a boarded platform';
     }
   } else if (S.tool === 'board' || S.tool === 'deck' || S.tool === 'trap') {
     const seg = boardSegAt(pt);
     S.paint = { y: seg ? seg.a[1] : null, done: new Set() };
     if (seg) { S.paint.done.add(seg.a[0]); tryPlace(seg); }
   }
-  // a mouse press that didn't grab anything pans the view instead
-  downInfo.canPan = downInfo.mouse && !S.drag && !S.chain && !(S.paint && S.paint.y !== null);
+  // a press (mouse or finger) that didn't grab anything drags the view instead
+  downInfo.canPan = !S.drag && !(S.paint && S.paint.y !== null);
 });
 function panByPixels(dx, dy) {
   S.camGoal = null;
@@ -609,12 +623,18 @@ function dragChain(pt) {
   }
 }
 cvs.addEventListener('pointermove', (ev) => {
+  if (ev.pointerType === 'touch' && touchesDown.size > 1) return;
+  if (S.mode === 'test' && downInfo && downInfo.viewOnly && ev.buttons) {
+    if (Math.hypot(ev.clientX - downInfo.x, ev.clientY - downInfo.y) > 4) panByPixels(ev.clientX - downInfo.lx, ev.clientY - downInfo.ly);
+    downInfo.lx = ev.clientX; downInfo.ly = ev.clientY;
+    return;
+  }
   if (S.mode !== 'design') return;
   const pt = pickLocal(ev);
   S.hoverPt = pt;
   if (downInfo && !downInfo.right && ev.buttons) {
     const moved = Math.hypot(ev.clientX - downInfo.x, ev.clientY - downInfo.y);
-    if (downInfo.canPan && moved > 4) { panByPixels(ev.clientX - downInfo.lx, ev.clientY - downInfo.ly); downInfo.panned = true; }
+    if (downInfo.canPan && (moved > 8 || downInfo.panned)) { panByPixels(ev.clientX - downInfo.lx, ev.clientY - downInfo.ly); downInfo.panned = true; }
     if (S.drag && (S.tool === 'tube' || S.tool === 'heavy') && moved > 8 && pt) dragChain(pt);
     downInfo.lx = ev.clientX; downInfo.ly = ev.clientY;
   }
@@ -628,7 +648,10 @@ cvs.addEventListener('pointermove', (ev) => {
   }
 });
 window.addEventListener('pointerup', (ev) => {
+  forgetTouch(ev);
+  if (ev.pointerType === 'touch' && touchesDown.size) return;   // other fingers still down
   if (S.mode !== 'design') { downInfo = null; return; }
+  if (downInfo && downInfo.hint && !downInfo.panned) toast(downInfo.hint);
   const moved = downInfo ? Math.hypot(ev.clientX - downInfo.x, ev.clientY - downInfo.y) : 99;
   if (downInfo && downInfo.right) { if (moved < 5) S.chain = null; downInfo = null; return; }
   const pt = ev.target === cvs ? pickLocal(ev) : null;

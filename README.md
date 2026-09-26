@@ -18,7 +18,7 @@ Big Terry's rule: *as long as it doesn't fall down, it's fine.*
 
 Controls:
 - **Desktop:** click two dots to place a piece; hold and drag through dots to lay a chain of tubes. Drag empty space to pan, right-drag to orbit, wheel to zoom (or WASD/arrows and the on-screen pad). Ctrl+Z undoes.
-- **Phone/tablet:** tap two dots to place a piece; hold and drag to chain. Two fingers to move the camera. Landscape works best.
+- **Phone/tablet:** tap two dots to place a piece; hold and drag to chain. Drag empty space with one finger to pan; two fingers to orbit and zoom. Landscape works best.
 
 ## Code
 
