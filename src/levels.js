@@ -14,7 +14,7 @@ export const LEVELS = [
     house: { x0: 0.5, x1: 8.5, floors: 1, eaves: 3, brick: 'red', door: { x: 5.5, w: 1, h: 2.1, color: '#2f5d50' }, windows: [win(1.2, 0, 1.4), win(3.5, 0, 1.2), win(7.0, 0, 1.0)], roof: 'gable', chimney: 2 },
     zones: [{ x0: 2, x1: 5, y: 2, label: 'Gutter' }],
     deliveries: [{ item: 'hod', zone: 0, x: 2.5 }, { item: 'hod', zone: 0, x: 4.5 }],
-    budget: 300, chavs: 0, startX: 11,
+    budget: 330, chavs: 0, startX: 11, monster: true,
   },
   {
     id: 2, name: 'Window Dressing', client: 'The Okafors, 12 Mill Lane',
