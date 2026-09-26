@@ -432,6 +432,7 @@ function refreshDocket() {
     items.push([r.reachable, r.reachable ? 'Dave has a ladder up to it' : 'Dave needs ladders up to the platform']);
     if (zz._label) zz._label.el.classList.toggle('done', r.boarded);
   });
+  for (const h of req.heavy || []) items.push([false, `Dave + ${ITEMS[h.item].name.toLowerCase()} = ${h.carry} kg: he'd carry it across boards and snap them. Put his ladder within 1 m of the drop at ${h.x} m`]);
   const unlocked = groundLadders.length - Math.min(locks, groundLadders.length);
   const traps = S.pieces.filter(p => p.type === 'trap').length;
   if (L.chavs) items.push(['info', unlocked ? `${unlocked} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : 'Ladders locked: chavs stay on the ground']);

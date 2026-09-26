@@ -548,7 +548,7 @@ export class Sim {
 
   // Find a climbing/walking route from the ground to a board node.
   // Route up ladders and along boards. Path: [{ground foot}, {node, via}, ...]
-  findRoute(startX, targetNodes, dropX = null, { allowLocked = true, traps = 'walk' } = {}) {
+  findRoute(startX, targetNodes, dropX = null, { allowLocked = true, traps = 'walk', carry = 0 } = {}) {
     const nodes = this.nodes;
     const adj = new Map();
     const add = (a, b, w, kind, ref) => {
@@ -560,7 +560,9 @@ export class Sim {
     for (const b of this.boards) {
       if (b.broken) continue;
       if (b.type.id === 'trap' && traps === 'exclude') continue;
-      add(b.a, b.b, b.type.id === 'trap' && traps === 'avoid' ? 500 : 1, 'walk', b.id);
+      // a board that would snap under what Dave is carrying is a last resort
+      const risky = (b.type.id === 'trap' && traps === 'avoid') || (carry > 0 && carry > b.type.cap);
+      add(b.a, b.b, risky ? 500 : 1, 'walk', b.id);
     }
     const dist = new Map(), prev = new Map();
     const pq = [];
@@ -743,6 +745,39 @@ export function validatePlacement(level, pieces, p) {
 }
 function segKey(a, b) { const s = a.join(','), t = b.join(','); return s < t ? s + '|' + t : t + '|' + s; }
 
+// How Dave will take delivery d up: his route, where he stands to drop it, and
+// every board he'd have to walk across with the load (and whether it would snap).
+export function planDelivery(sim, level, d) {
+  const z = level.zones[d.zone], it = ITEMS[d.item];
+  const carry = BUILDER_MASS + it.mass;
+  const cands = [];
+  for (const bd of sim.boardsAtLevel(z.y)) if (bd.x1 > z.x0 - 0.01 && bd.x0 < z.x1 + 0.01) cands.push(bd.a, bd.b);
+  const route = sim.findRoute(level.startX ?? level.W + 2, cands, d.x, { traps: 'avoid', carry });
+  if (!route) return null;
+  const endX = sim.nodes[route[route.length - 1].node].gx;
+  const side = endX === d.x ? (d.x > z.x0 ? -1 : 1) : Math.sign(endX - d.x);
+  let dropX = Math.abs(endX - d.x) <= it.w / 2 + 0.9 ? endX : d.x + side * (it.w / 2 + 0.3);
+  dropX = Math.max(z.x0 + 0.15, Math.min(z.x1 - 0.15, dropX));
+  // boards walked with the load: along the route, then from the ladder top to the drop spot
+  const walked = new Map();
+  for (const st of route) if (st.via && st.via.kind === 'walk') walked.set(st.via.ref, 0.5);
+  const lo = Math.min(endX, dropX), hi = Math.max(endX, dropX);
+  for (const bd of sim.boardsAtLevel(z.y)) {
+    if (bd.x1 <= lo + 1e-6 || bd.x0 >= hi - 1e-6) continue;
+    // worst point Dave passes on this board (bending peaks at mid-span)
+    const a = Math.max(lo, bd.x0) - bd.x0, b = Math.min(hi, bd.x1) - bd.x0;
+    const t = a <= 0.5 && b >= 0.5 ? 0.5 : (Math.abs(a - 0.5) < Math.abs(b - 0.5) ? a : b);
+    walked.set(bd.id, Math.max(walked.get(bd.id) ?? 0, t));
+  }
+  const overloads = [];
+  for (const [id, t] of walked) {
+    const bd = sim.boards[id];
+    const load = carry * 4 * t * (1 - t);
+    if (load > bd.type.cap) overloads.push({ board: id, load, cap: bd.type.cap });
+  }
+  return { route, endX, dropX, carry, overloads };
+}
+
 // Static requirement checks: platforms boarded + builder access.
 export function checkRequirements(level, pieces) {
   const sim = new Sim(level);
@@ -756,7 +791,12 @@ export function checkRequirements(level, pieces) {
     const route = zNodes.length ? sim.findRoute(level.startX ?? level.W + 2, zNodes, null, { traps: 'exclude' }) : null;
     return { covered, need, boarded: covered >= need, reachable: !!route };
   });
-  return { zones, ok: zones.every(z => z.boarded && z.reachable) };
+  const heavy = [];
+  level.deliveries.forEach((d, i) => {
+    const plan = zones[d.zone].reachable ? planDelivery(sim, level, d) : null;
+    if (plan && plan.overloads.length) heavy.push({ delivery: i, item: d.item, carry: plan.carry, x: d.x, y: level.zones[d.zone].y });
+  });
+  return { zones, heavy, ok: zones.every(z => z.boarded && z.reachable) };
 }
 
 // ---------------------------------------------------------------------------
@@ -999,17 +1039,11 @@ export class Trial {
     const item = { def: ITEMS[d.item], key: d.item, x: this.startX, y: 0, vx: 0, vy: 0, state: 'carried', loads: [], rot: 0, vr: 0, targetX: d.x, zoneY: z.y };
     this.items.push(item);
     b.visible = true; b.carrying = item; b.x = this.startX; b.y = L.groundAt(this.startX); b.mode = 'ground';
-    const cands = [];
-    for (const bd of this.sim.boardsAtLevel(z.y)) if (bd.x1 > z.x0 - 0.01 && bd.x0 < z.x1 + 0.01) cands.push(bd.a, bd.b);
-    const route = this.sim.findRoute(this.startX, cands, d.x, { traps: 'avoid' });
-    if (!route) { this.fail("Dave can't get up to the platform"); return; }
-    b.route = route; b.routeI = 0; b.segT = 0; b.returning = false; b.u = null;
+    const plan = planDelivery(this.sim, { ...L, startX: this.startX }, d);
+    if (!plan) { this.fail("Dave can't get up to the platform"); return; }
+    b.route = plan.route; b.routeI = 0; b.segT = 0; b.returning = false; b.u = null;
     b.state = 'toBase';
-    const endX = this.sim.nodes[route[route.length - 1].node].gx;
-    const side = endX === d.x ? (d.x > z.x0 ? -1 : 1) : Math.sign(endX - d.x);
-    let sx = Math.abs(endX - d.x) <= ITEMS[d.item].w / 2 + 0.9 ? endX : d.x + side * (ITEMS[d.item].w / 2 + 0.3);
-    sx = Math.max(z.x0 + 0.15, Math.min(z.x1 - 0.15, sx));
-    b.dropX = sx; b.itemX = d.x;
+    b.dropX = plan.dropX; b.itemX = d.x;
   }
 
   _builder(dt) {

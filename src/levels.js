@@ -29,7 +29,7 @@ export const LEVELS = [
   {
     id: 3, name: 'Pallet Up', client: 'Brick & Sons Builders',
     brief: 'A whole pallet of bricks is going up to 3 m. Timber boards hold about 360 kg at mid-span, and Dave plus a pallet weighs over 500 kg.',
-    tip: 'Dave climbs the standard nearest the drop spot. Put a standard right under the drop and he can heave it across without walking on the boards.',
+    tip: 'Dave can\'t carry that pallet across timber boards. Run his ladder up to a standard within 1 m of the drop spot (4 m) and he\'ll heave it across from the top.',
     W: 9, H: 5,
     house: { x0: 0.5, x1: 8.5, floors: 2, eaves: 6, brick: 'yellow', door: { x: 6.5, w: 1, h: 2.1, color: '#1f3b73' }, windows: [win(2, 0, 1.2), win(2, 1, 1.2), win(4.5, 1, 1.2)], roof: 'gable', chimney: 1.5 },
     zones: [{ x0: 2, x1: 6, y: 3, label: 'Brickwork' }],
