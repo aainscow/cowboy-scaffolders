@@ -203,6 +203,16 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
 .lbl.risk { background: rgba(243, 212, 11, .92); color: #161b21; padding: 2px 7px; border-radius: 3px; font-size: 11.5px; }
 .lbl.shout.sheila { color: #ff8fc4; font-size: 21px; white-space: normal; width: 190px; text-align: center; line-height: 1.05; }
 .lbl.shout.monster { color: #c77dff; font-size: 26px; white-space: normal; width: 230px; text-align: center; line-height: 1.05; }
+#kitIntro { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 60; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow-y: auto; padding: 18px 20px; color: var(--text); }
+#kitIntro[hidden] { display: none; }
+#kitIntro .kh { font-family: var(--display); font-size: 28px; color: var(--hivis-yellow); letter-spacing: .04em; margin-bottom: 10px; }
+#kitIntro .ki { display: flex; gap: 12px; align-items: flex-start; margin: 10px 0; }
+#kitIntro .ki svg { width: 44px; height: 44px; flex: none; background: rgba(0,0,0,.25); border-radius: 8px; padding: 4px; }
+#kitIntro .kn { font-family: var(--cond); font-weight: 700; font-size: 17px; text-transform: uppercase; letter-spacing: .05em; }
+#kitIntro .kd { font-size: 14px; line-height: 1.35; color: var(--text-dim); }
+#kitIntro .kd b { color: var(--text); }
+#kitIntro button { margin-top: 10px; width: 100%; }
+.lbl.shout.landlord { color: #ffb347; font-size: 22px; white-space: normal; width: 200px; text-align: center; line-height: 1.05; }
 .lbl.shout.bonus { color: var(--hivis-yellow); font-size: 34px; }
 .tag .fields .v.bonus { color: #b8860b; }
 .sheet .tally { float: right; margin-top: -30px; font-family: var(--cond); font-weight: 700; color: var(--hivis-yellow); text-transform: uppercase; letter-spacing: .08em; font-size: 14px; }

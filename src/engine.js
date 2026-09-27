@@ -103,6 +103,7 @@ export function prepLevel(def) {
     const h = L.house;
     if (gx < h.x0 || gx > h.x1 || gy < L.groundCol(gx) + 1 || gy > h.eaves) return false;
     if (h.tieRows && !h.tieRows.includes(gy)) return false;
+    if (h.loadingDoors !== undefined && Math.abs(gx - h.loadingDoors) <= 0.6 && [3, 6].some(y0 => gy >= y0 - 0.01 && gy <= y0 + 2.01)) return false;
     if (h.style === 'rocket') return false;
     for (const w of h.windows || []) if (gx >= w.x - 0.01 && gx <= w.x + w.w + 0.01 && gy >= w.y - 0.01 && gy <= w.y + w.h + 0.01) return false;
     if (h.door && gx >= h.door.x - 0.01 && gx <= h.door.x + h.door.w + 0.01 && gy <= h.door.h + 0.01) return false;
@@ -985,7 +986,7 @@ export class Trial {
           p.y = g; p.state = 'flat';
           const h = (p.fallFrom ?? g) - g;
           this.events.push({ type: 'splat', who: p, h });
-          if (p.who === 'chav' && !p.tangled) {
+          if (p.who === 'chav' && !p.tangled && !p.knocked) {
             if (h > SAFE_FALL) { p.dead = true; this.sued = true; this.fail(`SUED! A chav fell ${h.toFixed(1)} m through your scaffold.`); if (this.result) this.result.sued = true; }
             else { p.trapped = true; this.trappedCount = (this.trappedCount || 0) + 1; this.events.push({ type: 'nicked', who: p }); }
           }

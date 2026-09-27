@@ -106,6 +106,7 @@ function visitorStep(tr, v, dt) {
   if (v.state === 'gone' || v.state === 'falling' || v.state === 'flat') return;
   v.t += dt;
   const end = () => sim.nodes[v.route[v.route.length - 1].node];
+  if (v.swinger && (v.state === 'plan' || v.state === 'toSwing' || v.state === 'swinghang')) return;   // the party handles these
   switch (v.state) {
     case 'wait': if (v.t > v.delay) { v.visible = true; v.state = 'plan'; v.t = 0; v.y = tr.level.groundAt(v.x); } return;
     case 'plan': {
@@ -197,16 +198,43 @@ function partyStart(E, ev) {
   const z = this.level.zones[0], n = E.guests;
   for (let i = 0; i < n; i++) {
     const tx = n > 1 ? z.x0 + 0.35 + i * (z.x1 - z.x0 - 0.7) / (n - 1) : (z.x0 + z.x1) / 2;
-    this.visitors.push(newVisitor(this, { style: PARTY_STYLES[i % PARTY_STYLES.length], name: 'A party guest', x: this.startX + 1.5 + (i % 3) * 0.5, homeX: this.startX + 4 + i * 0.3, delay: i * 1.1, targetX: tx, mass: 78, gy: z.y }));
+    this.visitors.push(newVisitor(this, { style: PARTY_STYLES[i % PARTY_STYLES.length], name: 'A party guest', x: this.startX + 1.5 + (i % 3) * 0.5, homeX: this.startX + 4 + i * 0.3, delay: i * 1.1, targetX: tx, mass: 78, gy: z.y, swinger: i % 5 === 3 }));
   }
   ev.partyT = -1; ev.beat = 0;
   this.builder.state = 'watch';
   this.events.push({ type: 'party', what: 'arrive' });
 }
 function partyUpdate(E, ev, dt) {
-  const V = this.visitors;
+  const V = this.visitors, sim = this.sim, L = this.level;
+  // a couple of guests would rather swing off the tubes
+  for (const v of V) {
+    if (!v.swinger) continue;
+    if (v.state === 'plan') {
+      const taken = new Set(V.filter(o => o !== v && o.member !== undefined).map(o => o.member));
+      const m = sim.members.find(mm => {
+        if (mm.broken || taken.has(mm.id)) return false;
+        const a = sim.nodes[mm.a], b = sim.nodes[mm.b];
+        if (a.gy !== b.gy) return false;
+        const h = a.gy - L.groundCol(Math.round((a.gx + b.gx) / 2));
+        return h >= 1 && h <= 2.6;
+      });
+      if (!m) { v.swinger = false; continue; }
+      v.member = m.id; v.swingX = (sim.nodes[m.a].gx + sim.nodes[m.b].gx) / 2; v.state = 'toSwing';
+    } else if (v.state === 'toSwing') {
+      if (this._walkGround(v, v.swingX, 1.7, dt)) { v.state = 'swinghang'; v.t = 0; }
+    } else if (v.state === 'swinghang') {
+      const m = sim.members[v.member];
+      const a = sim.nodes[m.a], b = sim.nodes[m.b];
+      v.x = (a.x + b.x) / 2; v.y = (a.y + b.y) / 2 - 2.0;
+      v.onMember = m.id; v.onBoard = -1; v.onLadder = -1;
+      const going = ev.partyT >= 0 && ev.partyT <= E.dur;
+      v.swing = going ? Math.sin(ev.beat / 2 + v.id) * Math.min(1, ev.partyT / 3) : Math.sin((v.t || 0) * 2) * 0.2;
+      this._setLoad(v, { kind: 'member', member: m.id, t: 0.5, mass: v.mass * (1 + 0.35 * Math.abs(v.swing)), fx: 300 * v.swing });
+      if (ev.partyT > E.dur) { this._setLoad(v, null); v.onMember = -1; v.swing = 0; v.y = L.groundAt(v.x); v.state = 'home'; }
+    }
+  }
   const dancing = V.filter(v => v.state === 'act');
-  if (ev.partyT < 0 && dancing.length && V.every(v => v.state === 'act' || v.state === 'stuck' || v.state === 'gone' || v.state === 'falling' || v.state === 'flat')) { ev.partyT = 0; this.events.push({ type: 'party', what: 'music' }); }
+  if (ev.partyT < 0 && dancing.length && V.every(v => v.state === 'act' || v.state === 'swinghang' || v.state === 'stuck' || v.state === 'gone' || v.state === 'falling' || v.state === 'flat')) { ev.partyT = 0; this.events.push({ type: 'party', what: 'music' }); }
   if (ev.partyT >= 0 && ev.partyT <= E.dur) {
     ev.partyT += dt;
     const f = E.beat * (1 + 0.25 * Math.min(1, ev.partyT / E.dur));   // the DJ speeds up
@@ -216,7 +244,7 @@ function partyUpdate(E, ev, dt) {
       v.hop = Math.max(0, Math.sin(ev.beat));
       v.massK = 1 + 0.6 * ramp * Math.sin(ev.beat);
       v.fx = E.sway * ramp * Math.sin(ev.beat / 2);   // everyone sways side to side together
-      v.dance = true;
+      v.dance = true; v.beat = ev.beat;
     }
     if (ev.partyT > E.dur) {
       this.events.push({ type: 'party', what: 'end' });

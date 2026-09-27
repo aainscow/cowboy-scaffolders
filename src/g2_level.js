@@ -88,6 +88,7 @@ function smashGlass(b) {
 // Plywood over the windows the player has boarded up.
 const plyMat = new THREE.MeshStandardMaterial({ color: 0xd9b27a, roughness: 0.85, map: woodTex });
 let boardUps = [];
+const awningMat = new THREE.MeshStandardMaterial({ roughness: 0.85, map: canvasTex(128, 32, (g, w, h) => { for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#f4efe2' : '#1f3b2c'; g.fillRect(i * 16, 0, 16, h); } }) });
 function syncBoardUps(L, pieces) {
   for (const m of boardUps) m.parent && m.parent.remove(m);
   boardUps = [];
@@ -95,6 +96,15 @@ function syncBoardUps(L, pieces) {
   for (const b of breakables) if (b.kind === 'window') b.protected = set.has(b.wi);
   (L.house.windows || []).forEach((w, i) => {
     if (!set.has(i)) return;
+    if (L.house.style === 'pub') {
+      // a striped canvas awning, sloping out over the window
+      const g = new THREE.Group(); g.position.set(w.x + w.w / 2, w.y + w.h + 0.35, 0.05);
+      const aw = new THREE.Mesh(new THREE.BoxGeometry(w.w + 0.5, 0.03, 1.0), awningMat); aw.position.set(0, -0.25, 0.45); aw.rotation.x = 0.55; aw.castShadow = true; g.add(aw);
+      const val = new THREE.Mesh(new THREE.BoxGeometry(w.w + 0.5, 0.18, 0.02), awningMat); val.position.set(0, -0.6, 0.88); g.add(val);
+      for (const sx of [-1, 1]) { const arm = box(0.03, 0.03, 0.95, M.iron, sx * (w.w / 2 + 0.2), -0.28, 0.45, g, false); arm.rotation.x = 0.55; }
+      levelGroup.add(g); boardUps.push(g);
+      return;
+    }
     const m = new THREE.Mesh(new THREE.BoxGeometry(w.w + 0.26, w.h + 0.26, 0.025), plyMat);
     m.position.set(w.x + w.w / 2, w.y + w.h / 2, 0.13); m.castShadow = true; m.receiveShadow = true;
     levelGroup.add(m); boardUps.push(m);
@@ -324,6 +334,23 @@ function lancetShape(w, h) {
 }
 function addWindow(g, wd, brick, reg, wi) {
   const { x, y, w, h } = wd;
+  if (wd.kind === 'mill') {
+    // small-paned cast-iron window under a segmental stone arch
+    const cx = x + w / 2, cy = y + h / 2;
+    const inside = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ color: 0x24211e, roughness: 1 }));
+    inside.position.set(cx, cy, 0.006); g.add(inside);
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), M.glass); glass.position.set(cx, cy, 0.02); g.add(glass);
+    const parts = [glass];
+    const bar = new THREE.MeshStandardMaterial({ color: 0x2b2f33, roughness: 0.6, metalness: 0.4 });
+    for (let i = 1; i < 3; i++) parts.push(box(0.025, h, 0.03, bar, x + i * w / 3, cy, 0.03, g, false));
+    for (let i = 1; i < 4; i++) parts.push(box(w, 0.025, 0.03, bar, cx, y + i * h / 4, 0.03, g, false));
+    parts.push(box(w + 0.06, 0.05, 0.05, bar, cx, y + h, 0.03, g, false));
+    const arch = new THREE.Mesh(new THREE.RingGeometry(w / 2 + 0.02, w / 2 + 0.2, 16, 1, 0.35, Math.PI - 0.7), M.sill);
+    arch.position.set(cx, y + h - 0.12, 0.03); g.add(arch); parts.push(arch);
+    parts.push(box(w + 0.3, 0.1, 0.18, M.sill, cx, y - 0.05, 0.08, g));
+    if (reg) makeBreakable('window', parts, g, { glass, rz: 1.3, wi });
+    return;
+  }
   if (wd.kind === 'lancet' || wd.kind === 'rose' || wd.kind === 'louvre') {
     const cx = x + w / 2;
     const geo = wd.kind === 'rose' ? new THREE.CircleGeometry(w / 2, 32) : new THREE.ShapeGeometry(lancetShape(w, h));
@@ -363,6 +390,17 @@ function addWindow(g, wd, brick, reg, wi) {
 function addDoor(g, dr) {
   const { x, w, h, color } = dr;
   const cx = x + w / 2;
+  if (dr.round) {
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, map: woodTex });
+    const shp = (ww, hh) => { const s2 = new THREE.Shape(), r = ww / 2; s2.moveTo(-r, 0); s2.lineTo(r, 0); s2.lineTo(r, hh - r); s2.absarc(0, hh - r, r, 0, Math.PI, false); s2.lineTo(-r, 0); return s2; };
+    const d = new THREE.Mesh(new THREE.ShapeGeometry(shp(w, h)), mat); d.position.set(cx, 0, 0.03); g.add(d);
+    const o = shp(w + 0.4, h + 0.2); o.holes.push(shp(w, h));
+    const sur = new THREE.Mesh(new THREE.ShapeGeometry(o), M.sill); sur.position.set(cx, 0, 0.045); g.add(sur);
+    const key = box(0.26, 0.34, 0.08, M.sill, cx, h + 0.06, 0.06, g, false);
+    box(0.03, h - w / 2, 0.04, M.dark, cx, (h - w / 2) / 2, 0.05, g, false);
+    for (const sx of [-1, 1]) for (const hy of [0.5, h - w / 2 - 0.3]) box(w / 2 - 0.12, 0.05, 0.04, M.iron, cx + sx * w / 4, hy, 0.05, g, false);
+    return;
+  }
   if (dr.arch) {
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, map: woodTex });
     const d = new THREE.Mesh(new THREE.ShapeGeometry(lancetShape(w, h)), mat); d.position.set(cx, 0, 0.03); g.add(d);
@@ -410,7 +448,7 @@ function buildLevelScene(L) {
   root.add(levelGroup);
   root.position.x = -L.W / 2;
   const G = levelGroup;
-  breakables = []; clearTags(); sceneDirty = false;
+  breakables = []; clearTags(); sceneDirty = false; sceneTickers.length = 0;
   const style = L.house.style || 'terrace';
   if (style !== 'rocket') buildHouse(G, L.house, { main: true, snow: L.snow });
   // world dressing that doesn't suit every job
@@ -587,13 +625,7 @@ function buildTheme(G, L, style) {
     bunting(G, h.x0, h.x1, h.eaves - 0.3, 0.25, 0.4);
     for (const x of [1.5, L.W - 1.5]) { box(1.4, 0.06, 0.5, M.bark, x, 0.72, 3.0, G); for (const dz of [-0.45, 0.45]) box(1.4, 0.05, 0.25, M.bark, x, 0.45, 3.0 + dz, G); }
   }
-  if (style === 'mill') {
-    const ld = h.loadingDoors;
-    for (let f = 0; f < 3; f++) box(1.1, 1.8, 0.06, new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8, map: woodTex }), ld, 0.8 + f * 3 + 0.9, 0.04, G);
-    const beam = box(0.2, 0.2, 1.6, M.bark, ld, h.eaves - 0.2, 0.6, G);
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.5, 24), new THREE.MeshStandardMaterial({ color: 0x4a3526, roughness: 0.9, map: woodTex }));
-    wheel.rotation.x = Math.PI / 2; wheel.rotation.z = Math.PI / 2; wheel.position.set(h.x0 - 0.35, 2.4, -3); wheel.castShadow = true; G.add(wheel);
-  }
+  if (style === 'mill') buildMill(G, L);
   if (style === 'church') {
     // west tower and spire off to the left
     const tx0 = h.x0 - 4.2, tw = 3.6, th = 14;
@@ -694,6 +726,83 @@ function buildTheme(G, L, style) {
     for (const x of [0, L.W]) { const planter = box(1.4, 0.5, 1.0, M.stoneWall, x, 0.25, 3.0, G); const t = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 1), M.leaf); t.position.set(x, 0.9, 3.0); G.add(t); }
   }
   if (style === 'rocket') buildRocket(G, L);
+}
+// ---------------------------------------------------------------------------
+//  The corn mill: stone bands and quoins, a stack of loading doors under a
+//  timber lucam with its hoist beam, a date stone, a brick chimney and the
+//  waterwheel on its race.
+// ---------------------------------------------------------------------------
+const sceneTickers = [];
+function sceneryTick(dt) { for (const f of sceneTickers) f(dt); }
+function buildMill(G, L) {
+  const h = L.house, w = h.x1 - h.x0, cx = (h.x0 + h.x1) / 2, ld = h.loadingDoors;
+  const dressed = new THREE.MeshStandardMaterial({ color: 0xd9d0bd, roughness: 0.85 });
+  const timber = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8, map: woodTex });
+  const darkTimber = new THREE.MeshStandardMaterial({ color: 0x3a2618, roughness: 0.85, map: woodTex });
+  const iron = M.iron;
+  // string courses at each floor, and a cornice
+  for (const y of [3, 6]) box(w + 0.12, 0.16, 0.12, dressed, cx, y - 0.08, 0.06, G, false);
+  box(w + 0.3, 0.22, 0.25, dressed, cx, h.eaves - 0.11, 0.1, G);
+  // quoins: alternating long and short dressed stones up both corners
+  for (const [x, s] of [[h.x0, 1], [h.x1, -1]]) for (let y = 0.15, i = 0; y < h.eaves - 0.3; y += 0.34, i++) {
+    const lw = i % 2 ? 0.34 : 0.56;
+    box(lw, 0.3, 0.06, dressed, x + s * lw / 2, y + 0.15, 0.03, G, false);
+  }
+  // loading doors on the first and second floors: frame, two planked leaves, strap hinges, a stone lintel
+  for (const y0 of [3, 6]) {
+    const dw = 1.1, dh = 2.0;
+    box(dw + 0.24, 0.24, 0.14, dressed, ld, y0 + dh + 0.12, 0.07, G);
+    box(dw + 0.3, 0.1, 0.18, dressed, ld, y0 + 0.05, 0.09, G);
+    for (const sx of [-1, 1]) {
+      box(0.1, dh, 0.08, darkTimber, ld + sx * (dw / 2 + 0.05), y0 + dh / 2, 0.04, G, false);
+      const leaf = box(dw / 2 - 0.02, dh - 0.1, 0.05, timber, ld + sx * (dw / 4), y0 + dh / 2 + 0.05, 0.03, G, false);
+      for (let k = 1; k < 4; k++) box(0.012, dh - 0.12, 0.055, darkTimber, ld + sx * (dw / 4) - dw / 4 + k * dw / 8, y0 + dh / 2 + 0.05, 0.035, G, false);
+      for (const hy of [0.45, dh - 0.35]) box(dw / 2 - 0.1, 0.05, 0.065, iron, ld + sx * (dw / 4 + 0.03), y0 + hy, 0.04, G, false);
+      box(0.05, 0.05, 0.08, iron, ld + sx * 0.08, y0 + dh / 2, 0.06, G, false);
+    }
+  }
+  // the lucam: a timber hoist housing sticking out over the loading doors, with its own little roof
+  const luc = new THREE.Group(); luc.position.set(ld, h.eaves - 0.9, 0); G.add(luc);
+  const board = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.85, map: woodTex });
+  box(1.7, 2.1, 1.3, board, 0, 1.05, 0.2, luc);
+  for (let y = 0.15; y < 2.1; y += 0.22) box(1.72, 0.03, 1.32, darkTimber, 0, y, 0.2, luc, false);
+  box(0.9, 1.1, 0.04, darkTimber, 0, 0.75, 0.87, luc, false);
+  const slate = new THREE.MeshStandardMaterial({ map: slateTex, roughness: 0.8 });
+  for (const sg of [-1, 1]) { const r = box(1.05, 0.08, 1.6, slate, sg * 0.45, 2.45, 0.25, luc); r.rotation.z = -sg * 0.62; }
+  box(0.1, 0.12, 1.65, darkTimber, 0, 2.78, 0.25, luc);
+  // hoist beam, pulley and chain
+  box(0.18, 0.2, 1.4, darkTimber, 0, 2.05, 1.35, luc);
+  const pul = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.03, 8, 16), iron); pul.position.set(0, 1.85, 1.9); luc.add(pul);
+  for (let i = 0; i < 7; i++) { const l = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.012, 5, 8), iron); l.position.set(0, 1.7 - i * 0.09, 1.9); l.rotation.y = (i % 2) * Math.PI / 2; luc.add(l); }
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 6, 10, Math.PI * 1.4), iron); hook.position.set(0, 1.02, 1.9); luc.add(hook);
+  // date stone
+  if (h.datestone) {
+    const tex = canvasTex(512, 128, (g, cw, ch) => { g.fillStyle = '#d9d0bd'; g.fillRect(0, 0, cw, ch); g.strokeStyle = '#8a8070'; g.lineWidth = 8; g.strokeRect(8, 8, cw - 16, ch - 16); g.fillStyle = '#5a5244'; g.font = '700 60px Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(h.datestone, cw / 2, ch / 2 + 3); });
+    const ds = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.48, 0.08), [dressed, dressed, dressed, dressed, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }), dressed]);
+    ds.position.set(2.3, 8.45, 0.05); G.add(ds);
+  }
+  // tall brick chimney behind the mill
+  const brick = texFromFacade('red', 1.6, 16);
+  const ch = box(1.5, 16, 1.5, brick, h.x1 + 1.7, 8, -6, G);
+  for (const y of [15.2, 15.6]) box(1.8, 0.25, 1.8, dressed, h.x1 + 1.7, y, -6, G);
+  box(1.8, 0.3, 1.8, dressed, h.x1 + 1.7, 0.15, -6, G);
+  // the waterwheel on the side wall, turning on its race
+  const wheel = new THREE.Group(); wheel.position.set(h.x0 - 0.75, 2.3, -3.4); G.add(wheel);
+  const wt = new THREE.MeshStandardMaterial({ color: 0x4a3526, roughness: 0.9, map: woodTex });
+  const R = 2.3;
+  for (const dx of [-0.3, 0.3]) { const rim = new THREE.Mesh(new THREE.TorusGeometry(R, 0.08, 8, 40), wt); rim.rotation.y = Math.PI / 2; rim.position.x = dx; wheel.add(rim); }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.8, 16), iron); hub.rotation.z = Math.PI / 2; wheel.add(hub);
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.6, 10), iron); axle.rotation.z = Math.PI / 2; axle.position.x = 0.6; wheel.add(axle);
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; for (const dx of [-0.3, 0.3]) { const sp = new THREE.Mesh(new THREE.BoxGeometry(0.08, R * 2, 0.1), wt); sp.position.x = dx; sp.rotation.x = a; wheel.add(sp); } }
+  for (let i = 0; i < 20; i++) { const a = i * Math.PI * 2 / 20; const pd = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.05, 0.42), wt); pd.position.set(0, Math.sin(a) * (R - 0.15), Math.cos(a) * (R - 0.15)); pd.rotation.x = -a; pd.castShadow = true; wheel.add(pd); }
+  sceneTickers.push((dt) => { wheel.rotation.x -= dt * 0.45; });
+  // the race: a stone channel of water running past the wheel
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 12), new THREE.MeshStandardMaterial({ color: 0x3f6f86, roughness: 0.15, metalness: 0.2 }));
+  water.rotation.x = -Math.PI / 2; water.position.set(h.x0 - 0.75, 0.06, -3); G.add(water);
+  for (const dx of [-0.6, 0.6]) box(0.2, 0.3, 12, M.stoneWall, h.x0 - 0.75 + dx, 0.15, -3, G);
+  // sacks and a cart by the door
+  const sackM = new THREE.MeshStandardMaterial({ color: 0xc8b48a, roughness: 1 });
+  for (let i = 0; i < 3; i++) { const sk = new THREE.Mesh(new RoundedBoxGeometry(0.55, 0.7, 0.4, 3, 0.12), sackM); sk.position.set(6.3 + i * 0.5, 0.35, 3.1 - (i % 2) * 0.25); sk.rotation.y = i * 0.4; sk.castShadow = true; G.add(sk); }
 }
 const rocketParts = { g: null, flame: null, y0: 0 };
 function buildRocket(G, L) {

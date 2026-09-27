@@ -203,6 +203,16 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
 .lbl.risk { background: rgba(243, 212, 11, .92); color: #161b21; padding: 2px 7px; border-radius: 3px; font-size: 11.5px; }
 .lbl.shout.sheila { color: #ff8fc4; font-size: 21px; white-space: normal; width: 190px; text-align: center; line-height: 1.05; }
 .lbl.shout.monster { color: #c77dff; font-size: 26px; white-space: normal; width: 230px; text-align: center; line-height: 1.05; }
+#kitIntro { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 60; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow-y: auto; padding: 18px 20px; color: var(--text); }
+#kitIntro[hidden] { display: none; }
+#kitIntro .kh { font-family: var(--display); font-size: 28px; color: var(--hivis-yellow); letter-spacing: .04em; margin-bottom: 10px; }
+#kitIntro .ki { display: flex; gap: 12px; align-items: flex-start; margin: 10px 0; }
+#kitIntro .ki svg { width: 44px; height: 44px; flex: none; background: rgba(0,0,0,.25); border-radius: 8px; padding: 4px; }
+#kitIntro .kn { font-family: var(--cond); font-weight: 700; font-size: 17px; text-transform: uppercase; letter-spacing: .05em; }
+#kitIntro .kd { font-size: 14px; line-height: 1.35; color: var(--text-dim); }
+#kitIntro .kd b { color: var(--text); }
+#kitIntro button { margin-top: 10px; width: 100%; }
+.lbl.shout.landlord { color: #ffb347; font-size: 22px; white-space: normal; width: 200px; text-align: center; line-height: 1.05; }
 .lbl.shout.bonus { color: var(--hivis-yellow); font-size: 34px; }
 .tag .fields .v.bonus { color: #b8860b; }
 .sheet .tally { float: right; margin-top: -30px; font-family: var(--cond); font-weight: 700; color: var(--hivis-yellow); text-transform: uppercase; letter-spacing: .08em; font-size: 14px; }
@@ -298,7 +308,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
     <button class="big" id="playBtn">Clock on</button>
     <div class="fine">Best in landscape. Headphones on for the crashes.</div>
     <div class="fine">Big Terry wants it cheap. Dave just wants to get home.</div>
-    <div class="fine">Build 2026-09-27 22:11 UTC</div>
+    <div class="fine">Build 2026-09-27 22:34 UTC</div>
   </div>
 </div>
 
@@ -306,7 +316,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
   <div class="sheet panel">
     <h2>Job sheet</h2>
     <div class="tally" id="chavTally"></div>
-    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-09-27 22:11 UTC</div>
+    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-09-27 22:34 UTC</div>
     <div class="sub">Twenty-four jobs. Houses first, then the specials: a mill, Terry's party, a church, an abbey, a zip wire, a BMX, fireworks, Father Christmas, a bell tower, two skyscrapers and a rocket. Whatever you don't spend is profit.</div>
     <div class="grid" id="cards"></div>
   </div>
@@ -435,6 +445,7 @@ function visitorStep(tr, v, dt) {
   if (v.state === 'gone' || v.state === 'falling' || v.state === 'flat') return;
   v.t += dt;
   const end = () => sim.nodes[v.route[v.route.length - 1].node];
+  if (v.swinger && (v.state === 'plan' || v.state === 'toSwing' || v.state === 'swinghang')) return;   // the party handles these
   switch (v.state) {
     case 'wait': if (v.t > v.delay) { v.visible = true; v.state = 'plan'; v.t = 0; v.y = tr.level.groundAt(v.x); } return;
     case 'plan': {
@@ -526,16 +537,43 @@ function partyStart(E, ev) {
   const z = this.level.zones[0], n = E.guests;
   for (let i = 0; i < n; i++) {
     const tx = n > 1 ? z.x0 + 0.35 + i * (z.x1 - z.x0 - 0.7) / (n - 1) : (z.x0 + z.x1) / 2;
-    this.visitors.push(newVisitor(this, { style: PARTY_STYLES[i % PARTY_STYLES.length], name: 'A party guest', x: this.startX + 1.5 + (i % 3) * 0.5, homeX: this.startX + 4 + i * 0.3, delay: i * 1.1, targetX: tx, mass: 78, gy: z.y }));
+    this.visitors.push(newVisitor(this, { style: PARTY_STYLES[i % PARTY_STYLES.length], name: 'A party guest', x: this.startX + 1.5 + (i % 3) * 0.5, homeX: this.startX + 4 + i * 0.3, delay: i * 1.1, targetX: tx, mass: 78, gy: z.y, swinger: i % 5 === 3 }));
   }
   ev.partyT = -1; ev.beat = 0;
   this.builder.state = 'watch';
   this.events.push({ type: 'party', what: 'arrive' });
 }
 function partyUpdate(E, ev, dt) {
-  const V = this.visitors;
+  const V = this.visitors, sim = this.sim, L = this.level;
+  // a couple of guests would rather swing off the tubes
+  for (const v of V) {
+    if (!v.swinger) continue;
+    if (v.state === 'plan') {
+      const taken = new Set(V.filter(o => o !== v && o.member !== undefined).map(o => o.member));
+      const m = sim.members.find(mm => {
+        if (mm.broken || taken.has(mm.id)) return false;
+        const a = sim.nodes[mm.a], b = sim.nodes[mm.b];
+        if (a.gy !== b.gy) return false;
+        const h = a.gy - L.groundCol(Math.round((a.gx + b.gx) / 2));
+        return h >= 1 && h <= 2.6;
+      });
+      if (!m) { v.swinger = false; continue; }
+      v.member = m.id; v.swingX = (sim.nodes[m.a].gx + sim.nodes[m.b].gx) / 2; v.state = 'toSwing';
+    } else if (v.state === 'toSwing') {
+      if (this._walkGround(v, v.swingX, 1.7, dt)) { v.state = 'swinghang'; v.t = 0; }
+    } else if (v.state === 'swinghang') {
+      const m = sim.members[v.member];
+      const a = sim.nodes[m.a], b = sim.nodes[m.b];
+      v.x = (a.x + b.x) / 2; v.y = (a.y + b.y) / 2 - 2.0;
+      v.onMember = m.id; v.onBoard = -1; v.onLadder = -1;
+      const going = ev.partyT >= 0 && ev.partyT <= E.dur;
+      v.swing = going ? Math.sin(ev.beat / 2 + v.id) * Math.min(1, ev.partyT / 3) : Math.sin((v.t || 0) * 2) * 0.2;
+      this._setLoad(v, { kind: 'member', member: m.id, t: 0.5, mass: v.mass * (1 + 0.35 * Math.abs(v.swing)), fx: 300 * v.swing });
+      if (ev.partyT > E.dur) { this._setLoad(v, null); v.onMember = -1; v.swing = 0; v.y = L.groundAt(v.x); v.state = 'home'; }
+    }
+  }
   const dancing = V.filter(v => v.state === 'act');
-  if (ev.partyT < 0 && dancing.length && V.every(v => v.state === 'act' || v.state === 'stuck' || v.state === 'gone' || v.state === 'falling' || v.state === 'flat')) { ev.partyT = 0; this.events.push({ type: 'party', what: 'music' }); }
+  if (ev.partyT < 0 && dancing.length && V.every(v => v.state === 'act' || v.state === 'swinghang' || v.state === 'stuck' || v.state === 'gone' || v.state === 'falling' || v.state === 'flat')) { ev.partyT = 0; this.events.push({ type: 'party', what: 'music' }); }
   if (ev.partyT >= 0 && ev.partyT <= E.dur) {
     ev.partyT += dt;
     const f = E.beat * (1 + 0.25 * Math.min(1, ev.partyT / E.dur));   // the DJ speeds up
@@ -545,7 +583,7 @@ function partyUpdate(E, ev, dt) {
       v.hop = Math.max(0, Math.sin(ev.beat));
       v.massK = 1 + 0.6 * ramp * Math.sin(ev.beat);
       v.fx = E.sway * ramp * Math.sin(ev.beat / 2);   // everyone sways side to side together
-      v.dance = true;
+      v.dance = true; v.beat = ev.beat;
     }
     if (ev.partyT > E.dur) {
       this.events.push({ type: 'party', what: 'end' });
@@ -959,6 +997,7 @@ function prepLevel(def) {
     const h = L.house;
     if (gx < h.x0 || gx > h.x1 || gy < L.groundCol(gx) + 1 || gy > h.eaves) return false;
     if (h.tieRows && !h.tieRows.includes(gy)) return false;
+    if (h.loadingDoors !== undefined && Math.abs(gx - h.loadingDoors) <= 0.6 && [3, 6].some(y0 => gy >= y0 - 0.01 && gy <= y0 + 2.01)) return false;
     if (h.style === 'rocket') return false;
     for (const w of h.windows || []) if (gx >= w.x - 0.01 && gx <= w.x + w.w + 0.01 && gy >= w.y - 0.01 && gy <= w.y + w.h + 0.01) return false;
     if (h.door && gx >= h.door.x - 0.01 && gx <= h.door.x + h.door.w + 0.01 && gy <= h.door.h + 0.01) return false;
@@ -1841,7 +1880,7 @@ class Trial {
           p.y = g; p.state = 'flat';
           const h = (p.fallFrom ?? g) - g;
           this.events.push({ type: 'splat', who: p, h });
-          if (p.who === 'chav' && !p.tangled) {
+          if (p.who === 'chav' && !p.tangled && !p.knocked) {
             if (h > SAFE_FALL) { p.dead = true; this.sued = true; this.fail(`SUED! A chav fell ${h.toFixed(1)} m through your scaffold.`); if (this.result) this.result.sued = true; }
             else { p.trapped = true; this.trappedCount = (this.trappedCount || 0) + 1; this.events.push({ type: 'nicked', who: p }); }
           }
@@ -2502,7 +2541,7 @@ const LEVELS = [
     brief: "The developers want a sack of grain and the original millstone back up at the loft doors, 6 m up. Too heavy to carry: fit a gin wheel and haul them up on a rope.",
     tip: "The rope has to hang clear to the ground, so the wheel goes out on a cantilever past the end of the scaffold. Rope over a wheel pulls down twice the load. Brace the arm.",
     W: 10, H: 8,
-    house: { style: 'mill', x0: 0.5, x1: 8.5, floors: 3, eaves: 9, brick: 'stone', door: { x: 1.2, w: 1.3, h: 2.4, color: '#3c2a1e' }, windows: [win(3.4, 0, 0.9), win(6.6, 0, 0.9), win(1.4, 1, 0.9), win(6.6, 1, 0.9), win(1.4, 2, 0.9)], roof: 'gable', loadingDoors: 4.2 },
+    house: { style: 'mill', x0: 0.5, x1: 8.5, floors: 3, eaves: 9, brick: 'stone', door: { x: 4.2, w: 1.6, h: 2.8, color: '#3a2618', round: true }, windows: [{ x: 1.2, y: 1.0, w: 0.8, h: 1.3, kind: 'mill' }, { x: 2.6, y: 1.0, w: 0.8, h: 1.3, kind: 'mill' }, { x: 6.5, y: 1.0, w: 0.8, h: 1.3, kind: 'mill' }, { x: 7.5, y: 1.0, w: 0.8, h: 1.3, kind: 'mill' }, { x: 1.2, y: 3.7, w: 0.8, h: 1.3, kind: 'mill' }, { x: 2.6, y: 3.7, w: 0.8, h: 1.3, kind: 'mill' }, { x: 6.5, y: 3.7, w: 0.8, h: 1.3, kind: 'mill' }, { x: 7.5, y: 3.7, w: 0.8, h: 1.3, kind: 'mill' }, { x: 1.2, y: 6.7, w: 0.8, h: 1.3, kind: 'mill' }, { x: 2.6, y: 6.7, w: 0.8, h: 1.3, kind: 'mill' }, { x: 6.5, y: 6.7, w: 0.8, h: 1.3, kind: 'mill' }, { x: 7.5, y: 6.7, w: 0.8, h: 1.3, kind: 'mill' }], roof: 'gable', loadingDoors: 5, datestone: 'CORN MILL 1832' },
     zones: [{ x0: 3, x1: 7, y: 6, label: 'Loft doors' }],
     deliveries: [],
     event: { type: 'hoist', loads: ['sacks', 'millstone'] },
@@ -2511,13 +2550,13 @@ const LEVELS = [
   },
   {
     id: 14, name: "Terry's 50th", client: 'The Scaffolders Arms',
-    brief: "Terry's having his 50th on the scaffold outside his local. Ten of the lads will be dancing on the platform at 3 m. Get the beer and the speakers up first.",
+    brief: "Terry's having his 50th on the scaffold outside his local. A dozen of the lads will be partying on and around the platform at 3 m. Get the beer and the speakers up first.",
     tip: 'Everyone jumps in time to the music and sways side to side together. A floppy scaffold rocks harder and harder until something gives. Braces and ties keep it stiff.',
     W: 10, H: 5,
     house: { style: 'pub', x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'render', door: { x: 4.5, w: 1.1, h: 2.2, color: '#1f3b2c' }, windows: [win(1.3, 0, 1.6), win(7, 0, 1.6), win(1.5, 1, 1.2), win(4.5, 1, 1.1), win(7.2, 1, 1.2)], roof: 'gable', chimney: 8, sign: 'THE SCAFFOLDERS ARMS' },
     zones: [{ x0: 2, x1: 8, y: 3, label: 'Dance floor' }],
     deliveries: [{ item: 'keg', zone: 0, x: 3 }, { item: 'speakers', zone: 0, x: 7 }],
-    event: { type: 'party', guests: 10, dur: 20, beat: 2.0, sway: 170 },
+    event: { type: 'party', guests: 12, dur: 20, beat: 2.0, sway: 200 },
     budget: 860, chavs: 1, startX: 12,
   },
   {
@@ -3148,6 +3187,7 @@ function smashGlass(b) {
 // Plywood over the windows the player has boarded up.
 const plyMat = new THREE.MeshStandardMaterial({ color: 0xd9b27a, roughness: 0.85, map: woodTex });
 let boardUps = [];
+const awningMat = new THREE.MeshStandardMaterial({ roughness: 0.85, map: canvasTex(128, 32, (g, w, h) => { for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#f4efe2' : '#1f3b2c'; g.fillRect(i * 16, 0, 16, h); } }) });
 function syncBoardUps(L, pieces) {
   for (const m of boardUps) m.parent && m.parent.remove(m);
   boardUps = [];
@@ -3155,6 +3195,15 @@ function syncBoardUps(L, pieces) {
   for (const b of breakables) if (b.kind === 'window') b.protected = set.has(b.wi);
   (L.house.windows || []).forEach((w, i) => {
     if (!set.has(i)) return;
+    if (L.house.style === 'pub') {
+      // a striped canvas awning, sloping out over the window
+      const g = new THREE.Group(); g.position.set(w.x + w.w / 2, w.y + w.h + 0.35, 0.05);
+      const aw = new THREE.Mesh(new THREE.BoxGeometry(w.w + 0.5, 0.03, 1.0), awningMat); aw.position.set(0, -0.25, 0.45); aw.rotation.x = 0.55; aw.castShadow = true; g.add(aw);
+      const val = new THREE.Mesh(new THREE.BoxGeometry(w.w + 0.5, 0.18, 0.02), awningMat); val.position.set(0, -0.6, 0.88); g.add(val);
+      for (const sx of [-1, 1]) { const arm = box(0.03, 0.03, 0.95, M.iron, sx * (w.w / 2 + 0.2), -0.28, 0.45, g, false); arm.rotation.x = 0.55; }
+      levelGroup.add(g); boardUps.push(g);
+      return;
+    }
     const m = new THREE.Mesh(new THREE.BoxGeometry(w.w + 0.26, w.h + 0.26, 0.025), plyMat);
     m.position.set(w.x + w.w / 2, w.y + w.h / 2, 0.13); m.castShadow = true; m.receiveShadow = true;
     levelGroup.add(m); boardUps.push(m);
@@ -3384,6 +3433,23 @@ function lancetShape(w, h) {
 }
 function addWindow(g, wd, brick, reg, wi) {
   const { x, y, w, h } = wd;
+  if (wd.kind === 'mill') {
+    // small-paned cast-iron window under a segmental stone arch
+    const cx = x + w / 2, cy = y + h / 2;
+    const inside = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ color: 0x24211e, roughness: 1 }));
+    inside.position.set(cx, cy, 0.006); g.add(inside);
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), M.glass); glass.position.set(cx, cy, 0.02); g.add(glass);
+    const parts = [glass];
+    const bar = new THREE.MeshStandardMaterial({ color: 0x2b2f33, roughness: 0.6, metalness: 0.4 });
+    for (let i = 1; i < 3; i++) parts.push(box(0.025, h, 0.03, bar, x + i * w / 3, cy, 0.03, g, false));
+    for (let i = 1; i < 4; i++) parts.push(box(w, 0.025, 0.03, bar, cx, y + i * h / 4, 0.03, g, false));
+    parts.push(box(w + 0.06, 0.05, 0.05, bar, cx, y + h, 0.03, g, false));
+    const arch = new THREE.Mesh(new THREE.RingGeometry(w / 2 + 0.02, w / 2 + 0.2, 16, 1, 0.35, Math.PI - 0.7), M.sill);
+    arch.position.set(cx, y + h - 0.12, 0.03); g.add(arch); parts.push(arch);
+    parts.push(box(w + 0.3, 0.1, 0.18, M.sill, cx, y - 0.05, 0.08, g));
+    if (reg) makeBreakable('window', parts, g, { glass, rz: 1.3, wi });
+    return;
+  }
   if (wd.kind === 'lancet' || wd.kind === 'rose' || wd.kind === 'louvre') {
     const cx = x + w / 2;
     const geo = wd.kind === 'rose' ? new THREE.CircleGeometry(w / 2, 32) : new THREE.ShapeGeometry(lancetShape(w, h));
@@ -3423,6 +3489,17 @@ function addWindow(g, wd, brick, reg, wi) {
 function addDoor(g, dr) {
   const { x, w, h, color } = dr;
   const cx = x + w / 2;
+  if (dr.round) {
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, map: woodTex });
+    const shp = (ww, hh) => { const s2 = new THREE.Shape(), r = ww / 2; s2.moveTo(-r, 0); s2.lineTo(r, 0); s2.lineTo(r, hh - r); s2.absarc(0, hh - r, r, 0, Math.PI, false); s2.lineTo(-r, 0); return s2; };
+    const d = new THREE.Mesh(new THREE.ShapeGeometry(shp(w, h)), mat); d.position.set(cx, 0, 0.03); g.add(d);
+    const o = shp(w + 0.4, h + 0.2); o.holes.push(shp(w, h));
+    const sur = new THREE.Mesh(new THREE.ShapeGeometry(o), M.sill); sur.position.set(cx, 0, 0.045); g.add(sur);
+    const key = box(0.26, 0.34, 0.08, M.sill, cx, h + 0.06, 0.06, g, false);
+    box(0.03, h - w / 2, 0.04, M.dark, cx, (h - w / 2) / 2, 0.05, g, false);
+    for (const sx of [-1, 1]) for (const hy of [0.5, h - w / 2 - 0.3]) box(w / 2 - 0.12, 0.05, 0.04, M.iron, cx + sx * w / 4, hy, 0.05, g, false);
+    return;
+  }
   if (dr.arch) {
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, map: woodTex });
     const d = new THREE.Mesh(new THREE.ShapeGeometry(lancetShape(w, h)), mat); d.position.set(cx, 0, 0.03); g.add(d);
@@ -3470,7 +3547,7 @@ function buildLevelScene(L) {
   root.add(levelGroup);
   root.position.x = -L.W / 2;
   const G = levelGroup;
-  breakables = []; clearTags(); sceneDirty = false;
+  breakables = []; clearTags(); sceneDirty = false; sceneTickers.length = 0;
   const style = L.house.style || 'terrace';
   if (style !== 'rocket') buildHouse(G, L.house, { main: true, snow: L.snow });
   // world dressing that doesn't suit every job
@@ -3647,13 +3724,7 @@ function buildTheme(G, L, style) {
     bunting(G, h.x0, h.x1, h.eaves - 0.3, 0.25, 0.4);
     for (const x of [1.5, L.W - 1.5]) { box(1.4, 0.06, 0.5, M.bark, x, 0.72, 3.0, G); for (const dz of [-0.45, 0.45]) box(1.4, 0.05, 0.25, M.bark, x, 0.45, 3.0 + dz, G); }
   }
-  if (style === 'mill') {
-    const ld = h.loadingDoors;
-    for (let f = 0; f < 3; f++) box(1.1, 1.8, 0.06, new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8, map: woodTex }), ld, 0.8 + f * 3 + 0.9, 0.04, G);
-    const beam = box(0.2, 0.2, 1.6, M.bark, ld, h.eaves - 0.2, 0.6, G);
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.5, 24), new THREE.MeshStandardMaterial({ color: 0x4a3526, roughness: 0.9, map: woodTex }));
-    wheel.rotation.x = Math.PI / 2; wheel.rotation.z = Math.PI / 2; wheel.position.set(h.x0 - 0.35, 2.4, -3); wheel.castShadow = true; G.add(wheel);
-  }
+  if (style === 'mill') buildMill(G, L);
   if (style === 'church') {
     // west tower and spire off to the left
     const tx0 = h.x0 - 4.2, tw = 3.6, th = 14;
@@ -3754,6 +3825,83 @@ function buildTheme(G, L, style) {
     for (const x of [0, L.W]) { const planter = box(1.4, 0.5, 1.0, M.stoneWall, x, 0.25, 3.0, G); const t = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 1), M.leaf); t.position.set(x, 0.9, 3.0); G.add(t); }
   }
   if (style === 'rocket') buildRocket(G, L);
+}
+// ---------------------------------------------------------------------------
+//  The corn mill: stone bands and quoins, a stack of loading doors under a
+//  timber lucam with its hoist beam, a date stone, a brick chimney and the
+//  waterwheel on its race.
+// ---------------------------------------------------------------------------
+const sceneTickers = [];
+function sceneryTick(dt) { for (const f of sceneTickers) f(dt); }
+function buildMill(G, L) {
+  const h = L.house, w = h.x1 - h.x0, cx = (h.x0 + h.x1) / 2, ld = h.loadingDoors;
+  const dressed = new THREE.MeshStandardMaterial({ color: 0xd9d0bd, roughness: 0.85 });
+  const timber = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8, map: woodTex });
+  const darkTimber = new THREE.MeshStandardMaterial({ color: 0x3a2618, roughness: 0.85, map: woodTex });
+  const iron = M.iron;
+  // string courses at each floor, and a cornice
+  for (const y of [3, 6]) box(w + 0.12, 0.16, 0.12, dressed, cx, y - 0.08, 0.06, G, false);
+  box(w + 0.3, 0.22, 0.25, dressed, cx, h.eaves - 0.11, 0.1, G);
+  // quoins: alternating long and short dressed stones up both corners
+  for (const [x, s] of [[h.x0, 1], [h.x1, -1]]) for (let y = 0.15, i = 0; y < h.eaves - 0.3; y += 0.34, i++) {
+    const lw = i % 2 ? 0.34 : 0.56;
+    box(lw, 0.3, 0.06, dressed, x + s * lw / 2, y + 0.15, 0.03, G, false);
+  }
+  // loading doors on the first and second floors: frame, two planked leaves, strap hinges, a stone lintel
+  for (const y0 of [3, 6]) {
+    const dw = 1.1, dh = 2.0;
+    box(dw + 0.24, 0.24, 0.14, dressed, ld, y0 + dh + 0.12, 0.07, G);
+    box(dw + 0.3, 0.1, 0.18, dressed, ld, y0 + 0.05, 0.09, G);
+    for (const sx of [-1, 1]) {
+      box(0.1, dh, 0.08, darkTimber, ld + sx * (dw / 2 + 0.05), y0 + dh / 2, 0.04, G, false);
+      const leaf = box(dw / 2 - 0.02, dh - 0.1, 0.05, timber, ld + sx * (dw / 4), y0 + dh / 2 + 0.05, 0.03, G, false);
+      for (let k = 1; k < 4; k++) box(0.012, dh - 0.12, 0.055, darkTimber, ld + sx * (dw / 4) - dw / 4 + k * dw / 8, y0 + dh / 2 + 0.05, 0.035, G, false);
+      for (const hy of [0.45, dh - 0.35]) box(dw / 2 - 0.1, 0.05, 0.065, iron, ld + sx * (dw / 4 + 0.03), y0 + hy, 0.04, G, false);
+      box(0.05, 0.05, 0.08, iron, ld + sx * 0.08, y0 + dh / 2, 0.06, G, false);
+    }
+  }
+  // the lucam: a timber hoist housing sticking out over the loading doors, with its own little roof
+  const luc = new THREE.Group(); luc.position.set(ld, h.eaves - 0.9, 0); G.add(luc);
+  const board = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.85, map: woodTex });
+  box(1.7, 2.1, 1.3, board, 0, 1.05, 0.2, luc);
+  for (let y = 0.15; y < 2.1; y += 0.22) box(1.72, 0.03, 1.32, darkTimber, 0, y, 0.2, luc, false);
+  box(0.9, 1.1, 0.04, darkTimber, 0, 0.75, 0.87, luc, false);
+  const slate = new THREE.MeshStandardMaterial({ map: slateTex, roughness: 0.8 });
+  for (const sg of [-1, 1]) { const r = box(1.05, 0.08, 1.6, slate, sg * 0.45, 2.45, 0.25, luc); r.rotation.z = -sg * 0.62; }
+  box(0.1, 0.12, 1.65, darkTimber, 0, 2.78, 0.25, luc);
+  // hoist beam, pulley and chain
+  box(0.18, 0.2, 1.4, darkTimber, 0, 2.05, 1.35, luc);
+  const pul = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.03, 8, 16), iron); pul.position.set(0, 1.85, 1.9); luc.add(pul);
+  for (let i = 0; i < 7; i++) { const l = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.012, 5, 8), iron); l.position.set(0, 1.7 - i * 0.09, 1.9); l.rotation.y = (i % 2) * Math.PI / 2; luc.add(l); }
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 6, 10, Math.PI * 1.4), iron); hook.position.set(0, 1.02, 1.9); luc.add(hook);
+  // date stone
+  if (h.datestone) {
+    const tex = canvasTex(512, 128, (g, cw, ch) => { g.fillStyle = '#d9d0bd'; g.fillRect(0, 0, cw, ch); g.strokeStyle = '#8a8070'; g.lineWidth = 8; g.strokeRect(8, 8, cw - 16, ch - 16); g.fillStyle = '#5a5244'; g.font = '700 60px Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(h.datestone, cw / 2, ch / 2 + 3); });
+    const ds = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.48, 0.08), [dressed, dressed, dressed, dressed, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }), dressed]);
+    ds.position.set(2.3, 8.45, 0.05); G.add(ds);
+  }
+  // tall brick chimney behind the mill
+  const brick = texFromFacade('red', 1.6, 16);
+  const ch = box(1.5, 16, 1.5, brick, h.x1 + 1.7, 8, -6, G);
+  for (const y of [15.2, 15.6]) box(1.8, 0.25, 1.8, dressed, h.x1 + 1.7, y, -6, G);
+  box(1.8, 0.3, 1.8, dressed, h.x1 + 1.7, 0.15, -6, G);
+  // the waterwheel on the side wall, turning on its race
+  const wheel = new THREE.Group(); wheel.position.set(h.x0 - 0.75, 2.3, -3.4); G.add(wheel);
+  const wt = new THREE.MeshStandardMaterial({ color: 0x4a3526, roughness: 0.9, map: woodTex });
+  const R = 2.3;
+  for (const dx of [-0.3, 0.3]) { const rim = new THREE.Mesh(new THREE.TorusGeometry(R, 0.08, 8, 40), wt); rim.rotation.y = Math.PI / 2; rim.position.x = dx; wheel.add(rim); }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.8, 16), iron); hub.rotation.z = Math.PI / 2; wheel.add(hub);
+  const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.6, 10), iron); axle.rotation.z = Math.PI / 2; axle.position.x = 0.6; wheel.add(axle);
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; for (const dx of [-0.3, 0.3]) { const sp = new THREE.Mesh(new THREE.BoxGeometry(0.08, R * 2, 0.1), wt); sp.position.x = dx; sp.rotation.x = a; wheel.add(sp); } }
+  for (let i = 0; i < 20; i++) { const a = i * Math.PI * 2 / 20; const pd = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.05, 0.42), wt); pd.position.set(0, Math.sin(a) * (R - 0.15), Math.cos(a) * (R - 0.15)); pd.rotation.x = -a; pd.castShadow = true; wheel.add(pd); }
+  sceneTickers.push((dt) => { wheel.rotation.x -= dt * 0.45; });
+  // the race: a stone channel of water running past the wheel
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 12), new THREE.MeshStandardMaterial({ color: 0x3f6f86, roughness: 0.15, metalness: 0.2 }));
+  water.rotation.x = -Math.PI / 2; water.position.set(h.x0 - 0.75, 0.06, -3); G.add(water);
+  for (const dx of [-0.6, 0.6]) box(0.2, 0.3, 12, M.stoneWall, h.x0 - 0.75 + dx, 0.15, -3, G);
+  // sacks and a cart by the door
+  const sackM = new THREE.MeshStandardMaterial({ color: 0xc8b48a, roughness: 1 });
+  for (let i = 0; i < 3; i++) { const sk = new THREE.Mesh(new RoundedBoxGeometry(0.55, 0.7, 0.4, 3, 0.12), sackM); sk.position.set(6.3 + i * 0.5, 0.35, 3.1 - (i % 2) * 0.25); sk.rotation.y = i * 0.4; sk.castShadow = true; G.add(sk); }
 }
 const rocketParts = { g: null, flame: null, y0: 0 };
 function buildRocket(G, L) {
@@ -4014,6 +4162,7 @@ const STYLES = {
   tyler: { top: 0x19a974, sleeve: 0x19a974, legs: 0x2b3f6b, shoe: 0xf6f6f6, hat: 'helmet', hatCol: 0xd8203a, skin: 0xe0a987, stripe: 0xffffff, scale: 0.82 },
   santa: { top: 0xc8102e, sleeve: 0xc8102e, legs: 0xc8102e, shoe: 0x111111, hat: 'santa', hatCol: 0xc8102e, skin: 0xf0c4a4, stripe: 0xffffff, beard: true },
   astro: { top: 0xeeeeee, sleeve: 0xeeeeee, legs: 0xeeeeee, shoe: 0xaaaaaa, hat: 'astro', hatCol: 0xffffff, skin: 0xe0a987, stripe: 0x1f3b73 },
+  landlord: { top: 0xf4f2ec, sleeve: 0xf4f2ec, legs: 0x2a2d33, shoe: 0x1b1b1b, hat: 'bald', hatCol: 0x6b4a2e, skin: 0xe8a888, stripe: 0x1f3b2c, apron: 0x1f3b2c, tache: true, scale: 1.1 },
   chav3: { top: 0x161616, sleeve: 0x161616, legs: 0x161616, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xb0122a, skin: 0xd79e7a, stripe: 0xffffff, can: 0xffd12d },
 };
 const personMats = {};
@@ -4052,6 +4201,9 @@ function addHat(parent, st, mt, part) {
     const glassy = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.3, clearcoat: 1 });
     part(new THREE.SphereGeometry(0.21, 20, 14), glassy, 0, 0.0, 0, parent);
     part(new THREE.SphereGeometry(0.17, 18, 12, -0.9, 1.8, 0.9, 1.1), new THREE.MeshStandardMaterial({ color: 0xd4a843, metalness: 1, roughness: 0.15 }), 0, 0.0, 0.06, parent);
+  } else if (st.hat === 'bald') {
+    // a shiny dome with a fringe round the back
+    part(new THREE.SphereGeometry(0.13, 14, 8, Math.PI * 0.6, Math.PI * 0.8, Math.PI * 0.35, Math.PI * 0.3), mt.hat, 0, 0, -0.01, parent).scale.set(1.05, 1.05, 1.1);
   } else if (st.hat === 'curlers') {
     // a perm in progress: hair plus a row of rollers
     part(new THREE.SphereGeometry(0.14, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), mt.hat, 0, 0.0, -0.01, parent).scale.set(1.05, 1.1, 1.08);
@@ -4103,6 +4255,13 @@ function makePerson(key) {
   part(new THREE.SphereGeometry(0.014, 6, 6), mt.eye, 0.045, 0.03, 0.115, head);
   addHat(head, st, mt, part);
   if (st.beard) { part(new THREE.SphereGeometry(0.12, 12, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), 0, -0.1, 0.07, head).scale.set(1, 1.2, 0.8); }
+  if (st.tache) { part(new THREE.BoxGeometry(0.13, 0.03, 0.03), new THREE.MeshStandardMaterial({ color: 0x4a3322, roughness: 1 }), 0, -0.045, 0.125, head); for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.03, 0.06, 0.03), new THREE.MeshStandardMaterial({ color: 0x4a3322 }), sx * 0.07, -0.07, 0.12, head); }
+  if (st.apron) {
+    const ap = new THREE.MeshStandardMaterial({ color: st.apron, roughness: 0.9 });
+    part(new THREE.BoxGeometry(0.38, 0.7, 0.02), ap, 0, 0.12, 0.135, torso);
+    part(new THREE.BoxGeometry(0.46, 0.03, 0.28), ap, 0, 0.2, 0, torso);
+    part(new THREE.BoxGeometry(0.12, 0.02, 0.4), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0.2, 0.62, 0.02, torso);   // bar towel over the shoulder
+  }
   if (st.collar) part(new THREE.BoxGeometry(0.06, 0.03, 0.02), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.66, 0.135, torso);
   const arms = [];
   for (const s of [-1, 1]) {
@@ -4152,9 +4311,9 @@ function animatePerson(g, p, dt, t) {
   const moving = Math.hypot(p.x - A.lastX, p.y - A.lastY, pz - (A.lastZ ?? pz)) / Math.max(dt, 1e-4);
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
   const riding = p.bike && (p.state === 'appear' || p.state === 'ride' || p.state === 'fly');
-  const st = p.dance ? 'bounce' : p.state === 'zip' ? 'hang' : riding ? 'ride' : p.state;
+  const st = p.dance ? 'dance' : (p.state === 'zip' || p.state === 'swinghang') ? 'hang' : riding ? 'ride' : p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
-  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride'].includes(st) ? st : p.mode;
+  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride', 'dance'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
   const groundZ = isDave ? 2.4 : 2.55 + (p.id || 0) * 0.14;
   let x = p.x, y = p.y, zT = groundZ, yawT = p.face > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -4166,6 +4325,13 @@ function animatePerson(g, p, dt, t) {
   if (mode === 'hang') { zT = Z_OUT + 0.3; yawT = Math.PI; }
   if (mode === 'haul') { yawT = Math.PI; }
   if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52; yawT = Math.PI / 2; }
+  let move = 0;
+  if (mode === 'dance') {
+    move = ((p.id || 0) * 7 + Math.floor(((p.beat || t * 12) / (2 * Math.PI)) / 8)) % 6;
+    zT = Z_MID + ((p.id || 0) % 3 - 1) * 0.3;
+    yawT = [0, Math.sin(t * 2) * 0.8, 0.4 * Math.sign(Math.sin(t * 3)), 0.3, Math.PI * Math.sin(t * 0.8), 0][move];
+    if (move === 5) y += (p.hop || 0) * 0.3;
+  }
   if (mode === 'rattle') { yawT = Math.PI; zT = Z_OUT + 0.85; x = p.x; }
   A.z += (zT - A.z) * Math.min(1, dt * 8);
   A.yaw += wrapAngle(yawT - A.yaw) * Math.min(1, dt * 10);
@@ -4173,7 +4339,7 @@ function animatePerson(g, p, dt, t) {
   const ph = A.phase;
   const carrying = !!p.carrying;
   u.pivot.position.set(0, 0, 0); u.pivot.rotation.set(0, 0, 0);
-  u.body.rotation.set(0, 0, 0); u.body.position.set(0, 0, 0);
+  u.body.rotation.set(0, 0, 0); u.body.position.set(0, 0, 0); u.hips.rotation.set(0, 0, 0);
   u.torso.rotation.set(0, 0, 0); u.head.rotation.set(0, 0, 0);
   for (const a of u.arms) { a.sh.rotation.set(0, 0, 0); a.el.rotation.set(0, 0, 0); }
   for (const l of u.legs) { l.hp.rotation.set(0, 0, 0); l.kn.rotation.set(0, 0, 0); }
@@ -4230,6 +4396,34 @@ function animatePerson(g, p, dt, t) {
     for (const a of u.arms) { a.sh.rotation.x = -3.05; }
     u.legs[0].hp.rotation.x = -0.3 - (p.swing || 0) * 0.5; u.legs[1].hp.rotation.x = -0.1 - (p.swing || 0) * 0.6;
     u.legs[0].kn.rotation.x = 0.5; u.legs[1].kn.rotation.x = 0.3;
+  } else if (mode === 'dance') {
+    const b = p.beat || t * 12, s = Math.sin(b), s2 = Math.sin(b / 2), k = Math.abs(s);
+    const legsSway = (a) => { u.legs[0].hp.rotation.x = -a * s2; u.legs[1].hp.rotation.x = a * s2; u.legs[0].kn.rotation.x = u.legs[1].kn.rotation.x = 0.25 + 0.2 * k; };
+    if (move === 0) {          // disco: point up, point down
+      legsSway(0.25); u.arms[1].sh.rotation.x = s2 > 0 ? -2.9 : -0.4; u.arms[1].sh.rotation.z = s2 > 0 ? -0.4 : 0.3; u.arms[0].sh.rotation.z = 0.4; u.arms[0].el.rotation.x = -1.2;
+      u.hips.rotation.z = s2 * 0.15; u.torso.rotation.z = -s2 * 0.1;
+    } else if (move === 1) {   // the twist
+      for (const l of u.legs) { l.hp.rotation.x = -0.5; l.kn.rotation.x = 0.9 + 0.2 * k; }
+      u.body.position.y = -0.18 + 0.05 * k; u.torso.rotation.y = s * 0.6; u.hips.rotation.y = -s * 0.4;
+      u.arms[0].sh.rotation.z = 1.2; u.arms[1].sh.rotation.z = -1.2; u.arms[0].el.rotation.x = u.arms[1].el.rotation.x = -1.0;
+    } else if (move === 2) {   // the robot
+      const st2 = Math.round(s2 * 2) / 2;
+      u.arms[0].sh.rotation.x = -1.4 - st2 * 0.6; u.arms[1].sh.rotation.x = -1.4 + st2 * 0.6; u.arms[0].el.rotation.x = u.arms[1].el.rotation.x = -1.57;
+      u.head.rotation.y = st2 * 0.6; u.torso.rotation.y = -st2 * 0.2; legsSway(0.1);
+    } else if (move === 3) {   // air guitar
+      u.torso.rotation.x = 0.3 + 0.15 * k; u.head.rotation.x = 0.3 * s;
+      u.arms[0].sh.rotation.x = -0.9; u.arms[0].sh.rotation.z = 0.6; u.arms[0].el.rotation.x = -1.3;
+      u.arms[1].sh.rotation.x = -0.6 + s * 0.4; u.arms[1].el.rotation.x = -1.0;
+      u.legs[0].hp.rotation.x = -0.4; u.legs[1].hp.rotation.x = 0.35; u.legs[0].kn.rotation.x = 0.5;
+    } else if (move === 4) {   // the sprinkler
+      u.arms[0].sh.rotation.x = -1.57; u.arms[0].el.rotation.y = 1.4; u.arms[0].sh.rotation.y = s2 * 0.6;
+      u.arms[1].sh.rotation.x = -1.57; u.arms[1].sh.rotation.z = -0.2; u.arms[1].sh.rotation.y = s2 * 0.6;
+      legsSway(0.2);
+    } else {                   // hands in the air
+      u.legs[0].kn.rotation.x = u.legs[1].kn.rotation.x = (1 - (p.hop || 0)) * 0.7;
+      u.legs[0].hp.rotation.x = u.legs[1].hp.rotation.x = -(1 - (p.hop || 0)) * 0.4;
+      u.arms[0].sh.rotation.z = 2.5 + s * 0.3; u.arms[1].sh.rotation.z = -2.5 - s * 0.3;
+    }
   } else if (mode === 'haul') {
     const s = Math.sin(t * 5);
     u.arms[0].sh.rotation.x = -2.6 + s * 0.9; u.arms[1].sh.rotation.x = -2.6 - s * 0.9;
@@ -4847,7 +5041,13 @@ const SHEILA_LINES = [
   'Look at the STATE of it!', "Don't you wave at me!", 'My Derek fitted that!', "I've got bingo tonight!", 'Cowboys, the lot of you!',
   "I'm writing to the council!", 'And the paper!', 'Bricks in my BATH!',
 ];
-const sheila = { active: false, state: 'idle', p: null, t: 0, rant: 0, lineT: 0, line: 0, level: null };
+const landlordMesh = makePerson('landlord'); landlordMesh.visible = false; root.add(landlordMesh);
+const LANDLORD_LINES = [
+  "OI! THAT'S MY WINDOW!", "You're BARRED!", 'All of you! Barred!', "That's going on your tab, Terry!", "Thirty years I've run this pub!",
+  'I had that glass etched!', "I've got the quiz on Thursday!", "Not so much as a PACKET OF CRISPS!", 'The brewery will hear about this!', 'Last orders for YOU, sunshine!',
+  'Get off my scaffolding! It is MY scaffolding now!', 'Cowboys, the lot of you!',
+];
+const sheila = { active: false, state: 'idle', p: null, t: 0, rant: 0, lineT: 0, line: 0, level: null, mesh: sheilaMesh, lines: SHEILA_LINES, cls: 'sheila' };
 function sheilaSmash(level, wx) {
   const S2 = sheila;
   if (!level || !level.house) return;
@@ -4855,10 +5055,12 @@ function sheilaSmash(level, wx) {
   if (S2.active && S2.state !== 'in') { S2.lineT = 0; return; }
   const h = level.house;
   const doorX = h.door ? h.door.x + h.door.w / 2 : h.x0 + 0.4;
+  const pub = h.style === 'pub';
+  S2.mesh = pub ? landlordMesh : sheilaMesh; S2.lines = pub ? LANDLORD_LINES : SHEILA_LINES; S2.cls = pub ? 'landlord' : 'sheila';
   if (!S2.p) S2.line = Math.floor(Math.random() * 3);
-  S2.p = { who: 'sheila', id: 0, visible: true, x: doorX, y: level.groundAt(doorX), z: 0.2, state: 'walk', mode: 'ground', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1 };
+  S2.p = { who: pub ? 'landlord' : 'sheila', id: 0, visible: true, x: doorX, y: level.groundAt(doorX), z: 0.2, state: 'walk', mode: 'ground', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1 };
   Object.assign(S2, { active: true, state: 'out', t: 0, lineT: 0.3, level, wx, doorX });
-  sheilaMesh.visible = true;
+  S2.mesh.visible = true;
 }
 function updateSheila(dt, t, davePos) {
   const S2 = sheila;
@@ -4885,19 +5087,19 @@ function updateSheila(dt, t, davePos) {
     P.yaw = Math.atan2(tx - P.x, Z_MID - P.z);   // square up to him
     S2.rant -= dt; S2.lineT -= dt;
     if (S2.lineT <= 0) {
-      const l = typeof shout === 'function' ? shout(SHEILA_LINES[S2.line % SHEILA_LINES.length], P.x, P.y + 2.3, 'sheila', P.z) : null;
+      const l = typeof shout === 'function' ? shout(S2.lines[S2.line % S2.lines.length], P.x, P.y + 2.3, S2.cls, P.z) : null;
       if (l) l.life = 2.2;
       S2.line++; S2.lineT = 2.0;
       if (typeof sfx !== 'undefined' && sfx.nag) sfx.nag();
     }
-    if (S2.rant <= 0) { S2.state = 'in'; const l = typeof shout === 'function' ? shout('HMPH!', P.x, P.y + 2.3, 'sheila', P.z) : null; if (l) l.life = 1.6; }
+    if (S2.rant <= 0) { S2.state = 'in'; const l = typeof shout === 'function' ? shout(S2.cls === 'landlord' ? 'AND STAY OUT!' : 'HMPH!', P.x, P.y + 2.3, S2.cls, P.z) : null; if (l) l.life = 1.6; }
   } else if (S2.state === 'in') {
     P.state = 'walk';
     if (Math.abs(P.x - S2.doorX) > 0.05 && P.z > 3) walk(S2.doorX, 3.4, 1.9);
-    else if (walk(S2.doorX, 0.1, 1.9)) { S2.active = false; S2.state = 'idle'; sheilaMesh.visible = false; if (typeof sfx !== 'undefined') sfx.thunk(); return; }
+    else if (walk(S2.doorX, 0.1, 1.9)) { S2.active = false; S2.state = 'idle'; S2.mesh.visible = false; if (typeof sfx !== 'undefined') sfx.thunk(); return; }
   }
   P.y = L.groundAt(P.x);
-  animatePerson(sheilaMesh, P, dt, t);
+  animatePerson(S2.mesh, P, dt, t);
 }
 // ---------------------------------------------------------------------------
 //  The Drain Gobbler: a squat green thing with too many eyes that lives in the
@@ -5001,7 +5203,7 @@ function resetMonsterView() {
 }
 const kevin = makePerson('agency'); kevin.visible = false; root.add(kevin);
 
-function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p: null, rant: 0 }); sheilaMesh.visible = false; }
+function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p: null, rant: 0 }); sheilaMesh.visible = false; landlordMesh.visible = false; }
 
 function resetPolice() {
   police.active = false; police.done = false; police.queue = []; police.state = 'idle';
@@ -5217,6 +5419,22 @@ const sfx = (() => {
     growl() { tone(70, 1.1, { type: 'sawtooth', gain: 0.22, slide: 45, attack: 0.08 }); tone(104, 0.9, { type: 'square', gain: 0.06, slide: 60, attack: 0.1 }); noise(1.0, { gain: 0.25, freq: 380, q: 2, type: 'bandpass', sweep: 180 }); },
     chomp() { for (let i = 0; i < 3; i++) { noise(0.08, { gain: 0.5, freq: 900, type: 'bandpass', when: i * 0.22 }); tone(160, 0.12, { type: 'square', gain: 0.12, slide: 70, when: i * 0.22 }); } tone(90, 0.5, { type: 'sine', gain: 0.35, slide: 40, when: 0.75 }); },
     portal() { tone(220, 1.6, { type: 'sine', gain: 0.12, slide: 1400, attack: 0.3 }); tone(330, 1.6, { type: 'triangle', gain: 0.06, slide: 2100, attack: 0.3 }); noise(1.6, { gain: 0.2, type: 'bandpass', freq: 300, q: 3, sweep: 5000 }); },
+    // four-on-the-floor disco: kick, off-beat open hat, clap on 2 and 4, octave bass, chord stabs
+    disco(n, d) {
+      const bass = [110, 110, 130.8, 146.8, 164.8, 146.8, 130.8, 98][n % 8];
+      tone(120, 0.16, { type: 'sine', gain: 0.45, slide: 45 });
+      noise(0.05, { gain: 0.1, type: 'highpass', freq: 7000, when: d / 2 });
+      if (n % 2) noise(0.12, { gain: 0.22, type: 'bandpass', freq: 1500, q: 0.9 });
+      tone(bass, d * 0.4, { type: 'square', gain: 0.05 }); tone(bass * 2, d * 0.35, { type: 'square', gain: 0.05, when: d / 2 });
+      if (n % 4 === 0) for (const k of [2, 2.52, 3]) tone(bass * k, d * 0.25, { type: 'sawtooth', gain: 0.03, when: d * 0.5 });
+      if (n % 8 === 6) tone(bass * 4, d * 0.6, { type: 'triangle', gain: 0.05, when: d * 0.25, slide: bass * 4.5 });
+    },
+    birthday() {
+      // Happy Birthday (Mildred and Patty Hill, public domain)
+      const N = { G: 392, A: 440, B: 494, C: 523, D: 587, E: 659, F: 698, G2: 784 };
+      const tune = [['G', .75], ['G', .25], ['A', 1], ['G', 1], ['C', 1], ['B', 2], ['G', .75], ['G', .25], ['A', 1], ['G', 1], ['D', 1], ['C', 2], ['G', .75], ['G', .25], ['G2', 1], ['E', 1], ['C', 1], ['B', 1], ['A', 2], ['F', .75], ['F', .25], ['E', 1], ['C', 1], ['D', 1], ['C', 2]];
+      let at = 0; for (const [k, len] of tune) { tone(N[k], len * 0.36, { type: 'triangle', gain: 0.16, when: at }); tone(N[k] / 2, len * 0.36, { type: 'sine', gain: 0.06, when: at }); at += len * 0.38; }
+    },
     kick() { tone(120, 0.18, { type: 'sine', gain: 0.45, slide: 45 }); noise(0.03, { gain: 0.15, type: 'highpass', freq: 2500 }); },
     glass() { noise(0.25, { gain: 0.35, type: 'highpass', freq: 4000 }); for (let i = 0; i < 6; i++) tone(2500 + Math.random() * 3000, 0.25, { gain: 0.05, when: Math.random() * 0.2 }); },
     splat() { noise(0.2, { gain: 0.5, freq: 700 }); tone(90, 0.25, { type: 'sine', gain: 0.4, slide: 40 }); tone(420, 0.12, { type: 'square', gain: 0.05, slide: 150, when: 0.05 }); },
@@ -5385,6 +5603,7 @@ const ICON = {
   lock: '<svg viewBox="0 0 34 34"><path d="M11 3v28M23 3v28" stroke="#dfe4e8" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="15" width="18" height="15" rx="1.5" fill="#f3d40b"/><path d="M8 20l6-5M8 27l12-12M14 30l12-10" stroke="#161b21" stroke-width="2"/><rect x="21" y="9" width="7" height="6" rx="1" fill="#d4a843"/><path d="M22.5 9V7a2 2 0 0 1 4 0v2" stroke="#d4a843" stroke-width="1.6" fill="none"/></svg>',
   trap: '<svg viewBox="0 0 34 34"><rect x="3" y="12" width="28" height="10" rx="1" fill="#c99a58"/><path d="M3 15h28M3 18.5h28" stroke="#8a6230" stroke-width=".8"/><path d="M15 12l3 4-3 2 4 4" stroke="#d7312a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   hatch: '<svg viewBox="0 0 34 34"><rect x="3" y="10" width="28" height="18" rx="1" fill="#1a0f22"/><rect x="3" y="4" width="28" height="9" rx="1" fill="#a8743f" transform="skewX(-12) translate(3 0)"/><circle cx="12" cy="22" r="2.6" fill="#fff27a"/><circle cx="12.5" cy="22.3" r="1.1" fill="#111"/><circle cx="20" cy="21" r="2.2" fill="#fff27a"/><circle cx="20.4" cy="21.3" r="0.9" fill="#111"/></svg>',
+  awning: '<svg viewBox="0 0 34 34"><rect x="7" y="13" width="20" height="17" fill="#2a3440" stroke="#f6f5f0" stroke-width="2"/><path d="M4 6h26l-3 9H7z" fill="#f4efe2"/><path d="M8 6l-1 9M13 6l-1 9M18 6v9M23 6l1 9M28 6l1 9" stroke="#1f3b2c" stroke-width="3"/><path d="M7 15q2 2 4 0q2 2 4 0q2 2 4 0q2 2 4 0q2 2 4 0" fill="#1f3b2c"/></svg>',
   wheel: '<svg viewBox="0 0 34 34"><circle cx="17" cy="12" r="7" fill="none" stroke="#dfe4e8" stroke-width="3"/><path d="M17 5v14M10 12h14" stroke="#dfe4e8" stroke-width="1.4"/><path d="M11 13v16M23 13v10" stroke="#c8b48a" stroke-width="2"/><rect x="18" y="23" width="10" height="7" rx="1" fill="#b6b2a8"/></svg>',
   zip: '<svg viewBox="0 0 34 34"><rect x="3" y="6" width="7" height="7" fill="#ff7a1a"/><path d="M8 9 L31 24" stroke="#dfe4e8" stroke-width="2"/><circle cx="20" cy="17" r="2.5" fill="#f3d40b"/><path d="M20 19v7M17 22h6" stroke="#f3d40b" stroke-width="2"/></svg>',
   chute: '<svg viewBox="0 0 34 34"><path d="M8 4h8l-2 8h-5zM9 12h6l-2 8h-5zM10 20h6l-2 8h-5z" fill="#ff7a1a"/><rect x="16" y="24" width="15" height="7" rx="1" fill="#f0b90b"/></svg>',
@@ -5408,13 +5627,45 @@ const TOOLS = [
   { id: 'order', name: 'Build order', price: 'Click pieces in order', key: '8' },
   { id: 'erase', name: 'Remove', price: 'Full refund', key: '9' },
 ];
+const toolAvailable = (t, L) => !((t.req && !L[t.req]) || (t.id === 'tie' && L.maxTies === 0));
+// Kit that gets introduced the first time a job needs it (the basics are there from job 1).
+const NEW_KIT = {
+  awning: `The landlord won't have plywood on his pub windows. On this job <b>Board up</b> becomes an <b>awning</b> (${'£' + BOARDUP.cost}): striped canvas over the glass that catches anything dropped from the platform, and looks lovely in the photos.`,
+  hatch: `A <b>trap door</b> dug into the pavement (${'£' + HATCH.cost}). Something lives in the drains round here and comes out after dark heading for Dave. If it walks over the trap door it drops into the secret basement and gets sent back where it came from. No trap door and it eats Dave: the agency charges ${'£' + NEW_BUILDER} for a new builder.`,
+  lock: `A <b>ladder lock</b> (${'£' + LOCK.cost}). The local youth come round after Dave's finished and climb any ladder they can to spray the house. Lock a ladder and they can't. Dave has the key.`,
+  trap: `A <b>trap board</b> (${'£' + BOARDS.trap.cost}/m). It looks like a real board but gives way under anyone. Catch a chav with it (a drop of ${SAFE_FALL} m or less) and the police pay a ${'£' + TRAP_REWARD} reward. Any higher and you get sued. Dave avoids them if he can.`,
+  heavy: `<b>Heavy tube</b> (${'£' + MATS.heavy.cost}/m). Stiffer and more than twice as strong as normal tube. Use it where the big loads go and on tall scaffolds.`,
+  deck: `<b>Steel deck</b> (${'£' + BOARDS.deck.cost}/m). Holds ${BOARDS.deck.cap} kg where timber boards hold ${BOARDS.board.cap}. For the really heavy stuff.`,
+  wheel: `A <b>gin wheel</b> (£45) for hauling loads up on a rope. Fit it to a joint at platform height or above, where the rope can hang clear to the ground: usually on an arm sticking out past the end. The rope pulls down with twice the load.`,
+  zip: `A <b>zip wire anchor</b> (£60). Fix it to a joint at platform level next to a board. The wire runs to the pub and pulls that joint sideways, hardest when a rider is halfway across.`,
+  chute: `A <b>rubble chute</b> (£40). Hang it off a joint at the end of the platform boards. It drops straight down, so it has to be over the skip.`,
+};
+const kitSeenThisSession = new Set();
+function introduceKit() {
+  const L = S.L;
+  const seen = new Set([...(save.d.seenKit || []), ...kitSeenThisSession]);
+  const fresh = TOOLS.filter(t => NEW_KIT[t.id] && toolAvailable(t, L) && !seen.has(t.id));
+  if (L.house.style === 'pub' && !seen.has('awning')) fresh.push({ id: 'awning', name: 'Awning' });
+  if (!fresh.length) return;
+  let el = $('kitIntro');
+  if (!el) { el = document.createElement('div'); el.id = 'kitIntro'; el.className = 'panel'; document.body.appendChild(el); }
+  el.innerHTML = `<div class="kh">New kit</div>${fresh.map(t => `<div class="ki">${ICON[t.id]}<div><div class="kn">${t.name}</div><div class="kd">${NEW_KIT[t.id]}</div></div></div>`).join('')}<button class="big" id="kitOk">Got it</button>`;
+  el.hidden = false;
+  $('kitOk').onclick = () => {
+    sfx.click(); el.hidden = true;
+    for (const t of fresh) kitSeenThisSession.add(t.id);
+    if (!DEV) { save.d.seenKit = [...new Set([...(save.d.seenKit || []), ...fresh.map(t => t.id)])]; save.write(); }
+    setTool(fresh[0].id === 'awning' ? 'protect' : fresh[0].id);
+  };
+}
 function renderTools() {
   const L = S.L;
   const el = $('tools');
-  el.innerHTML = TOOLS.map(t => {
-    const dis = (t.req && !L[t.req]) || (t.id === 'tie' && L.maxTies === 0);
+  const pub = L.house.style === 'pub';
+  el.innerHTML = TOOLS.filter(t => toolAvailable(t, L)).map(t => pub && t.id === 'protect' ? { ...t, name: 'Awning', price: `£${BOARDUP.cost} a window · no plywood at the pub` } : t).map(t => {
+    const dis = false;
     const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : t.id === 'hatch' ? (L.monster === 'hide' ? 'No digging here' : 'Nothing in the drains here') : ['wheel', 'zip', 'chute'].includes(t.id) ? 'Not on this job' : 'Later jobs') : t.price;
-    return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
+    return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${pub && t.id === 'protect' ? ICON.awning : ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
   }).join('') + `<hr><div class="mini"><button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button><button id="clearBtn" title="Remove everything">Clear</button></div><div class="mini"><button id="orderBtn" class="${S.showOrder ? 'on' : ''}" title="List the order the crew puts pieces up, and change it">Order list</button></div>`;
   el.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setTool(b.dataset.tool); }));
   $('undoBtn').onclick = undo;
@@ -5533,7 +5784,7 @@ function updateHelp() {
     tie: '<b>Click</b> a joint next to solid wall (blue dots) to tie it in. Ties stop sway but carry no weight.',
     ladder: '<b>Click</b> the foot (ground or a boarded platform), then the top. The top must land on boards. Dave only climbs ladders.',
     trap: `<b>Click or drag</b> along a tube to lay a fake board. It looks real but gives way under anyone. A chav who drops ${SAFE_FALL} m or less lies there dazed and the police pay ${fmt(TRAP_REWARD)} for them. Any higher and you get sued. Dave avoids trap boards if there's another way up.`,
-    protect: `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${glz()} glazier). Windows marked ⚠ are in the firing line.`,
+    protect: S.L && S.L.house.style === 'pub' ? `<b>Click</b> a window to put a striped canvas awning over it (£${BOARDUP.cost}). The landlord won't have plywood on his pub, but an awning catches anything dropped from above. Windows marked ⚠ are in the firing line.` : `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${glz()} glazier). Windows marked ⚠ are in the firing line.`,
     hatch: `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
     wheel: '<b>Click</b> a joint at platform height or above to fit the gin wheel. The rope must hang clear to the ground, so put it on an arm sticking out past the scaffold. Loads are swung onto the nearest board within 1.5 m.',
     zip: '<b>Click</b> a joint at platform level, next to a board, to anchor the zip wire. The wire runs to the pub and pulls that joint sideways, hard.',
@@ -5645,7 +5896,7 @@ function refreshDocket() {
   const traps = S.pieces.filter(p => p.type === 'trap').length;
   if (L.chavs) items.push(['info', chavsUp ? `${Math.max(1, unlocked)} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : groundLadders.length ? 'Ladders locked: chavs stay on the ground' : 'No ladders yet: chavs stay on the ground']);
   const unprot = [...(S.risk || [])].filter(i => !S.pieces.some(p => p.type === 'protect' && p.a[0] === i)).length;
-  if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? 'Windows in the firing line boarded' : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${glz()} each if smashed`]);
+  if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? (L.house.style === 'pub' ? 'Awnings over the windows in the firing line' : 'Windows in the firing line boarded') : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${glz()} each if smashed`]);
   for (const [ok, t] of req.event || []) items.push([ok, t]);
   if (L.monster === 'hide') items.push(['info', "Churchyard: no trap doors. Dave will climb up and pull his ladder up. The Gobbler will shake the scaffold"]);
   if (L.toolHatch) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
@@ -5798,9 +6049,14 @@ cvs.addEventListener('pointerdown', (ev) => {
       else if (n) downInfo.hint = 'Stand ladders on the ground or on a boarded platform';
     }
   } else if (S.tool === 'board' || S.tool === 'deck' || S.tool === 'trap') {
+    // only start laying boards on a tube that can take one (or along boards already there, to extend them);
+    // anywhere else the drag moves the view, and a plain tap explains why nothing happened
     const seg = boardSegAt(pt);
-    S.paint = { y: seg ? seg.a[1] : null, done: new Set() };
-    if (seg) { S.paint.done.add(seg.a[0]); tryPlace(seg); }
+    const err = seg ? validatePlacement(S.L, S.pieces, seg) : null;
+    if (seg && (!err || /already/i.test(err))) {
+      S.paint = { y: seg.a[1], done: new Set([seg.a[0]]) };
+      if (!err) tryPlace(seg);
+    } else { S.paint = null; if (err) downInfo.hint = err; }
   }
   // a press (mouse or finger) that didn't grab anything drags the view instead
   downInfo.canPan = !S.drag && !(S.paint && S.paint.y !== null);
@@ -6097,7 +6353,7 @@ function loadLevel(i) {
   const bar = $('bar');
   bar.querySelectorAll('.tick').forEach(t => t.remove());
   for (const [f, s] of [[0.7, '★★★'], [0.85, '★★']]) { const t = document.createElement('div'); t.className = 'tick'; t.style.left = f * 100 + '%'; t.innerHTML = `<span>${s}</span>`; bar.appendChild(t); }
-  if (!TOOLS.some(t => t.id === S.tool && (!t.req || L[t.req]))) S.tool = 'tube';
+  if (!TOOLS.some(t => t.id === S.tool && toolAvailable(t, L))) S.tool = 'tube';
   renderTools();
   setTool(S.tool);
   afterEdit();
@@ -6162,6 +6418,7 @@ function enterDesign() {
   afterEdit();
   updateHelp();
   sfx.wind(0);
+  introduceKit();
 }
 function currentLevel() { return S.L; }
 
@@ -6195,6 +6452,7 @@ function startTest() {
   if (!S.req) return;
   sfx.unlock(); sfx.clank(1);
   S.mode = 'test';
+  if ($('kitIntro')) $('kitIntro').hidden = true;
   S.trial = new Trial(S.L, cleanPieces(S.pieces));
   S.trial.skipDeliveries = !S.req.ok;
   S.trial.unfinished = !S.req.ok;
@@ -6362,6 +6620,28 @@ function showResult() {
 // ---------------------------------------------------------------------------
 const pileLocal = () => new THREE.Vector3(S.L.W + 3.4 - 0.2, 0.4, 4.8);
 const ZOFF_MAX = 2.2;
+const isChavRd = (r) => typeof r.key === 'string' && r.key.startsWith('chav');
+// Anyone standing where the wreckage (or a flying ragdoll, or a dropped load) comes down gets knocked flat.
+function knockPeople(tr, hitters, L) {
+  const hitBy = (x, y, z) => hitters.find(h => Math.abs(h.x - x) < 0.45 && h.y > y - 0.1 && h.y < y + 1.9 && Math.abs(h.z - z) < 0.9);
+  const engine = [[tr.builder, tr.builder.who === 'agency' ? kevin : dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)]), ...tr.visitors.map(v => [v, visitorMesh(v)])];
+  for (const [p, mesh] of engine) {
+    if (!p.visible || !mesh.visible || p.ragdolled || ['falling', 'flat', 'gone', 'zip'].includes(p.state)) continue;
+    const h = hitBy(p.x, p.y, mesh.position.z);
+    if (!h || h.src === p) continue;
+    p.tangled = false; p.knocked = true;
+    tr._fall(p, (h.vx || 0) * 0.6 + (Math.random() - 0.5), Math.max(0, h.vy || 0) * 0.3 + 1);
+  }
+  // Sheila isn't in the sim; she goes down on her own
+  if (sheila.active && sheila.p && !sheila.p.ragdolled && sheila.mesh.visible) {
+    const P = sheila.p, h = hitBy(P.x, P.y, sheila.mesh.position.z);
+    if (h) {
+      const rd = spawnRagdoll(sheila.mesh, P, L, { x: (h.vx || 0) * 0.6, y: 1.5, z: 0.6 });
+      sheila.active = false; sheila.mesh.visible = false;
+      shout(sheila.cls === 'landlord' ? 'MY PUB!' : 'OOH!', P.x, P.y + 2.2, sheila.cls);
+    }
+  }
+}
 function stepTest(dt) {
   const tr = S.trial, L = S.L;
   if (!tr) return;
@@ -6409,7 +6689,12 @@ function stepTest(dt) {
   // party: a kick drum on the beat
   if (tr.ev && tr.ev.type === 'party' && tr.ev.partyT >= 0 && tr.ev.partyT <= S.L.event.dur) {
     const beatN = Math.floor(tr.ev.beat / (2 * Math.PI));
-    if (beatN !== S.lastBeat) { S.lastBeat = beatN; sfx.kick(); if (beatN % 4 === 0) shout('♪', S.L.W / 2 + (Math.random() - 0.5) * 4, S.L.zones[0].y + 2.3, 'bonus'); }
+    if (beatN !== S.lastBeat) {
+      S.lastBeat = beatN;
+      const f = S.L.event.beat * (1 + 0.25 * Math.min(1, tr.ev.partyT / S.L.event.dur));
+      sfx.disco(beatN, 1 / (f * Math.max(1, S.speed)));
+      if (beatN % 4 === 0) shout(['♪', '♫', '♬'][beatN % 3], S.L.W / 2 + (Math.random() - 0.5) * 5, S.L.zones[0].y + 2.3, 'bonus');
+    }
   }
   // piece placement sounds
   if (tr.phase === 'build' && tr.idx !== S.lastIdx) {
@@ -6433,7 +6718,7 @@ function stepTest(dt) {
     }
   } else S.crashed = false;
   // people who come off become ragdolls
-  const people = [[tr.builder, dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)])];
+  const people = [[tr.builder, tr.builder.who === 'agency' ? kevin : dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)]), ...tr.visitors.map(v => [v, visitorMesh(v)])];
   for (const [p, mesh] of people) {
     if ((p.state === 'falling' || p.state === 'flat') && !p.ragdolled && mesh.visible) {
       const sim = tr.sim;
@@ -6444,7 +6729,8 @@ function stepTest(dt) {
       const vel = { x: p.vx || 0, y: p.tangled ? (p.vy || 0) : -1, z: 0.3 };
       const rd = spawnRagdoll(mesh, p, L, vel, tangle);
       if (p.who === 'chav') rd.chavMesh = mesh;
-      shout(p.who === 'dave' ? 'AAARGH!' : 'OI!', p.x, p.y + 2);
+      if (p.bike) bike.visible = false;
+      shout(p.who === 'dave' ? 'AAARGH!' : p.who === 'chav' ? 'OI!' : ['WHOA!', 'MY DRINK!', 'NOT AGAIN!', 'OOF!'][(p.id || 0) % 4], p.x, p.y + 2);
     }
   }
   const sdt = Math.min(0.033, dt * Math.min(S.speed, 2));
@@ -6453,12 +6739,13 @@ function stepTest(dt) {
     r.life = (r.life || 0) + dt;
     if (!r.dead && r.life > 0.8 && (r.still > 0.25 || r.life > 3)) {
       r.dead = true;
-      if (r.key === 'dave' || (r.person && r.person.dead)) comicDeath(r);
-      else { shout(`+${fmt(TRAP_REWARD)} REWARD`, r.center.x, r.center.y + 1.6, 'bonus'); sfx.fanfare(); }
+      if (r.key === 'dave' || r.key === 'agency' || (r.person && r.person.dead)) comicDeath(r);
+      else if (isChavRd(r)) { shout(`+${fmt(TRAP_REWARD)} REWARD`, r.center.x, r.center.y + 1.6, 'bonus'); sfx.fanfare(); }
+      else shout(r.key === 'sheila' ? 'MY HIP!' : r.key === 'landlord' ? "YOU'RE ALL BARRED" : 'OW…', r.center.x, r.center.y + 1.4);
     }
   }
   // chavs lying dazed or stuck in the wreckage: somebody's called the police
-  const stuck = ragdolls.filter(r => r.key !== 'dave' && r.dead && !r.queued && !(r.person && r.person.dead));
+  const stuck = ragdolls.filter(r => isChavRd(r) && r.dead && !r.queued && !(r.person && r.person.dead));
   if (stuck.length && !police.active) { S.policeWait = (S.policeWait || 0) + dt; if (S.policeWait > 1.2) { S.policeWait = 0; startPolice(stuck, L); } }
   // anything moving fast knocks the scenery about
   const hitters = [];
@@ -6469,9 +6756,9 @@ function stepTest(dt) {
     if (sp > 1.0) hitters.push({ x: n.x, y: n.y, z: Z_MID + (S.zoff[n.id] || 0), vx: n.vx, vy: n.vy });
   }
   for (const d of debris) if (!d.rest && !d.noHit && Math.hypot(d.vx, d.vy) > 1.5) hitters.push({ x: d.mesh.position.x, y: d.mesh.position.y, z: d.mesh.position.z, vx: d.vx, vy: d.vy });
-  for (const r of ragdolls) if (r.speed > 2) hitters.push({ x: r.center.x, y: r.center.y, z: r.center.z, vx: 0, vy: -2 });
+  for (const r of ragdolls) if (r.speed > 2) hitters.push({ x: r.center.x, y: r.center.y, z: r.center.z, vx: 0, vy: -2, src: r.person });
   for (const it of tr.items) if (it.state === 'falling' && it.zoneY === null && Math.abs(it.vy) > 2) hitters.push({ x: it.x, y: it.y, z: Z_MID, vx: 0, vy: it.vy });
-  if (hitters.length) checkBreakables(hitters);
+  if (hitters.length) { checkBreakables(hitters); knockPeople(tr, hitters, L); }
   // chavs jumping about in front of a window
   for (const c of tr.chavs) if (c.state === 'bounce' && c.t > 1) {
     const i = windowInFront(S.L, c.x, c.zy ?? Math.round(c.y), 0.2);
@@ -6488,7 +6775,7 @@ function stepTest(dt) {
   S.dusk = (S.dusk || 0) + (duskT - (S.dusk || 0)) * Math.min(1, dt * S.speed * 0.4);
   if (tr.phase === 'done') {
     S.resultT += dt;
-    const waitPolice = (police.active || ragdolls.some(r => r.key !== 'dave' && !r.queued && !(r.person && r.person.dead))) && S.resultT < 30;
+    const waitPolice = (police.active || ragdolls.some(r => isChavRd(r) && !r.queued && !(r.person && r.person.dead))) && S.resultT < 30;
     if (S.resultT > (ragdolls.length ? 4 : 1.1) && !waitPolice && $('result').hidden) showResult();
   }
   testStatus();
@@ -6500,7 +6787,7 @@ function eventFx(ev, L, tr) {
   if (ev.type === 'hoist' && ev.what === 'lift') { sfx.clank(0.5); say('HEAVE!', L.W - 1, 2.4); }
   else if (ev.type === 'party') {
     if (ev.what === 'music') { say('♪ DROP THE BEAT ♪', L.W / 2, zy + 2.6, 'bonus', 2.5); sfx.fanfare(); }
-    if (ev.what === 'end') say('HAPPY BIRTHDAY TEZ!', L.W / 2, zy + 2.6, 'bonus', 2.5);
+    if (ev.what === 'end') { say('HAPPY BIRTHDAY TEZ!', L.W / 2, zy + 2.6, 'bonus', 3); sfx.birthday(); }
   } else if (ev.type === 'zip') {
     if (ev.what === 'go') { say(ev.name === 'Sheila' ? 'WHEEEEE!' : ev.name === 'The vicar' ? 'LORD ABOVE!' : 'GERONIMOOO!', L.W, zy + 2.4, '', 2); sfx.snap(); }
   } else if (ev.type === 'chute') {
@@ -6792,6 +7079,7 @@ function frameBody(now) {
   updateGhosts(dt, S.t);
   updatePolice(dt, S.t);
   hatchView(dt);
+  sceneryTick(dt);
   snowView(S.L, dt, S.t);
   fireworksView(dt);
   updateSheila(dt, S.t, S.mode === 'test' && S.trial ? { x: dave.position.x, y: dave.position.y, visible: dave.visible } : null);
@@ -6816,7 +7104,7 @@ function frameBody(now) {
   if (window.__DEBUG_DESIGN) {
     const { level, pieces, test } = window.__DEBUG_DESIGN;
     window.__proj = (x, y) => { const v = new THREE.Vector3(x, y, Z_OUT); root.localToWorld(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight]; };
-    window.__S = S; window.__brk = () => breakables.filter(b => b.broken).map(b => b.kind); window.__fx = () => [ghosts.length, ragdolls.length, police.state, police.queue.length];
+    window.__dbg = { sheilaSmash, sheila, knockPeople, ragdolls }; window.__S = S; window.__brk = () => breakables.filter(b => b.broken).map(b => b.kind); window.__fx = () => [ghosts.length, ragdolls.length, police.state, police.queue.length];
     loadLevel(level);
     if (pieces) { S.pieces = cleanPieces(pieces); afterEdit(); }
     enterDesign();

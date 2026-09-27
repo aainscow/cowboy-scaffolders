@@ -60,6 +60,22 @@ const sfx = (() => {
     growl() { tone(70, 1.1, { type: 'sawtooth', gain: 0.22, slide: 45, attack: 0.08 }); tone(104, 0.9, { type: 'square', gain: 0.06, slide: 60, attack: 0.1 }); noise(1.0, { gain: 0.25, freq: 380, q: 2, type: 'bandpass', sweep: 180 }); },
     chomp() { for (let i = 0; i < 3; i++) { noise(0.08, { gain: 0.5, freq: 900, type: 'bandpass', when: i * 0.22 }); tone(160, 0.12, { type: 'square', gain: 0.12, slide: 70, when: i * 0.22 }); } tone(90, 0.5, { type: 'sine', gain: 0.35, slide: 40, when: 0.75 }); },
     portal() { tone(220, 1.6, { type: 'sine', gain: 0.12, slide: 1400, attack: 0.3 }); tone(330, 1.6, { type: 'triangle', gain: 0.06, slide: 2100, attack: 0.3 }); noise(1.6, { gain: 0.2, type: 'bandpass', freq: 300, q: 3, sweep: 5000 }); },
+    // four-on-the-floor disco: kick, off-beat open hat, clap on 2 and 4, octave bass, chord stabs
+    disco(n, d) {
+      const bass = [110, 110, 130.8, 146.8, 164.8, 146.8, 130.8, 98][n % 8];
+      tone(120, 0.16, { type: 'sine', gain: 0.45, slide: 45 });
+      noise(0.05, { gain: 0.1, type: 'highpass', freq: 7000, when: d / 2 });
+      if (n % 2) noise(0.12, { gain: 0.22, type: 'bandpass', freq: 1500, q: 0.9 });
+      tone(bass, d * 0.4, { type: 'square', gain: 0.05 }); tone(bass * 2, d * 0.35, { type: 'square', gain: 0.05, when: d / 2 });
+      if (n % 4 === 0) for (const k of [2, 2.52, 3]) tone(bass * k, d * 0.25, { type: 'sawtooth', gain: 0.03, when: d * 0.5 });
+      if (n % 8 === 6) tone(bass * 4, d * 0.6, { type: 'triangle', gain: 0.05, when: d * 0.25, slide: bass * 4.5 });
+    },
+    birthday() {
+      // Happy Birthday (Mildred and Patty Hill, public domain)
+      const N = { G: 392, A: 440, B: 494, C: 523, D: 587, E: 659, F: 698, G2: 784 };
+      const tune = [['G', .75], ['G', .25], ['A', 1], ['G', 1], ['C', 1], ['B', 2], ['G', .75], ['G', .25], ['A', 1], ['G', 1], ['D', 1], ['C', 2], ['G', .75], ['G', .25], ['G2', 1], ['E', 1], ['C', 1], ['B', 1], ['A', 2], ['F', .75], ['F', .25], ['E', 1], ['C', 1], ['D', 1], ['C', 2]];
+      let at = 0; for (const [k, len] of tune) { tone(N[k], len * 0.36, { type: 'triangle', gain: 0.16, when: at }); tone(N[k] / 2, len * 0.36, { type: 'sine', gain: 0.06, when: at }); at += len * 0.38; }
+    },
     kick() { tone(120, 0.18, { type: 'sine', gain: 0.45, slide: 45 }); noise(0.03, { gain: 0.15, type: 'highpass', freq: 2500 }); },
     glass() { noise(0.25, { gain: 0.35, type: 'highpass', freq: 4000 }); for (let i = 0; i < 6; i++) tone(2500 + Math.random() * 3000, 0.25, { gain: 0.05, when: Math.random() * 0.2 }); },
     splat() { noise(0.2, { gain: 0.5, freq: 700 }); tone(90, 0.25, { type: 'sine', gain: 0.4, slide: 40 }); tone(420, 0.12, { type: 'square', gain: 0.05, slide: 150, when: 0.05 }); },
@@ -228,6 +244,7 @@ const ICON = {
   lock: '<svg viewBox="0 0 34 34"><path d="M11 3v28M23 3v28" stroke="#dfe4e8" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="15" width="18" height="15" rx="1.5" fill="#f3d40b"/><path d="M8 20l6-5M8 27l12-12M14 30l12-10" stroke="#161b21" stroke-width="2"/><rect x="21" y="9" width="7" height="6" rx="1" fill="#d4a843"/><path d="M22.5 9V7a2 2 0 0 1 4 0v2" stroke="#d4a843" stroke-width="1.6" fill="none"/></svg>',
   trap: '<svg viewBox="0 0 34 34"><rect x="3" y="12" width="28" height="10" rx="1" fill="#c99a58"/><path d="M3 15h28M3 18.5h28" stroke="#8a6230" stroke-width=".8"/><path d="M15 12l3 4-3 2 4 4" stroke="#d7312a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   hatch: '<svg viewBox="0 0 34 34"><rect x="3" y="10" width="28" height="18" rx="1" fill="#1a0f22"/><rect x="3" y="4" width="28" height="9" rx="1" fill="#a8743f" transform="skewX(-12) translate(3 0)"/><circle cx="12" cy="22" r="2.6" fill="#fff27a"/><circle cx="12.5" cy="22.3" r="1.1" fill="#111"/><circle cx="20" cy="21" r="2.2" fill="#fff27a"/><circle cx="20.4" cy="21.3" r="0.9" fill="#111"/></svg>',
+  awning: '<svg viewBox="0 0 34 34"><rect x="7" y="13" width="20" height="17" fill="#2a3440" stroke="#f6f5f0" stroke-width="2"/><path d="M4 6h26l-3 9H7z" fill="#f4efe2"/><path d="M8 6l-1 9M13 6l-1 9M18 6v9M23 6l1 9M28 6l1 9" stroke="#1f3b2c" stroke-width="3"/><path d="M7 15q2 2 4 0q2 2 4 0q2 2 4 0q2 2 4 0q2 2 4 0" fill="#1f3b2c"/></svg>',
   wheel: '<svg viewBox="0 0 34 34"><circle cx="17" cy="12" r="7" fill="none" stroke="#dfe4e8" stroke-width="3"/><path d="M17 5v14M10 12h14" stroke="#dfe4e8" stroke-width="1.4"/><path d="M11 13v16M23 13v10" stroke="#c8b48a" stroke-width="2"/><rect x="18" y="23" width="10" height="7" rx="1" fill="#b6b2a8"/></svg>',
   zip: '<svg viewBox="0 0 34 34"><rect x="3" y="6" width="7" height="7" fill="#ff7a1a"/><path d="M8 9 L31 24" stroke="#dfe4e8" stroke-width="2"/><circle cx="20" cy="17" r="2.5" fill="#f3d40b"/><path d="M20 19v7M17 22h6" stroke="#f3d40b" stroke-width="2"/></svg>',
   chute: '<svg viewBox="0 0 34 34"><path d="M8 4h8l-2 8h-5zM9 12h6l-2 8h-5zM10 20h6l-2 8h-5z" fill="#ff7a1a"/><rect x="16" y="24" width="15" height="7" rx="1" fill="#f0b90b"/></svg>',
@@ -251,13 +268,45 @@ const TOOLS = [
   { id: 'order', name: 'Build order', price: 'Click pieces in order', key: '8' },
   { id: 'erase', name: 'Remove', price: 'Full refund', key: '9' },
 ];
+const toolAvailable = (t, L) => !((t.req && !L[t.req]) || (t.id === 'tie' && L.maxTies === 0));
+// Kit that gets introduced the first time a job needs it (the basics are there from job 1).
+const NEW_KIT = {
+  awning: `The landlord won't have plywood on his pub windows. On this job <b>Board up</b> becomes an <b>awning</b> (${'£' + BOARDUP.cost}): striped canvas over the glass that catches anything dropped from the platform, and looks lovely in the photos.`,
+  hatch: `A <b>trap door</b> dug into the pavement (${'£' + HATCH.cost}). Something lives in the drains round here and comes out after dark heading for Dave. If it walks over the trap door it drops into the secret basement and gets sent back where it came from. No trap door and it eats Dave: the agency charges ${'£' + NEW_BUILDER} for a new builder.`,
+  lock: `A <b>ladder lock</b> (${'£' + LOCK.cost}). The local youth come round after Dave's finished and climb any ladder they can to spray the house. Lock a ladder and they can't. Dave has the key.`,
+  trap: `A <b>trap board</b> (${'£' + BOARDS.trap.cost}/m). It looks like a real board but gives way under anyone. Catch a chav with it (a drop of ${SAFE_FALL} m or less) and the police pay a ${'£' + TRAP_REWARD} reward. Any higher and you get sued. Dave avoids them if he can.`,
+  heavy: `<b>Heavy tube</b> (${'£' + MATS.heavy.cost}/m). Stiffer and more than twice as strong as normal tube. Use it where the big loads go and on tall scaffolds.`,
+  deck: `<b>Steel deck</b> (${'£' + BOARDS.deck.cost}/m). Holds ${BOARDS.deck.cap} kg where timber boards hold ${BOARDS.board.cap}. For the really heavy stuff.`,
+  wheel: `A <b>gin wheel</b> (£45) for hauling loads up on a rope. Fit it to a joint at platform height or above, where the rope can hang clear to the ground: usually on an arm sticking out past the end. The rope pulls down with twice the load.`,
+  zip: `A <b>zip wire anchor</b> (£60). Fix it to a joint at platform level next to a board. The wire runs to the pub and pulls that joint sideways, hardest when a rider is halfway across.`,
+  chute: `A <b>rubble chute</b> (£40). Hang it off a joint at the end of the platform boards. It drops straight down, so it has to be over the skip.`,
+};
+const kitSeenThisSession = new Set();
+function introduceKit() {
+  const L = S.L;
+  const seen = new Set([...(save.d.seenKit || []), ...kitSeenThisSession]);
+  const fresh = TOOLS.filter(t => NEW_KIT[t.id] && toolAvailable(t, L) && !seen.has(t.id));
+  if (L.house.style === 'pub' && !seen.has('awning')) fresh.push({ id: 'awning', name: 'Awning' });
+  if (!fresh.length) return;
+  let el = $('kitIntro');
+  if (!el) { el = document.createElement('div'); el.id = 'kitIntro'; el.className = 'panel'; document.body.appendChild(el); }
+  el.innerHTML = `<div class="kh">New kit</div>${fresh.map(t => `<div class="ki">${ICON[t.id]}<div><div class="kn">${t.name}</div><div class="kd">${NEW_KIT[t.id]}</div></div></div>`).join('')}<button class="big" id="kitOk">Got it</button>`;
+  el.hidden = false;
+  $('kitOk').onclick = () => {
+    sfx.click(); el.hidden = true;
+    for (const t of fresh) kitSeenThisSession.add(t.id);
+    if (!DEV) { save.d.seenKit = [...new Set([...(save.d.seenKit || []), ...fresh.map(t => t.id)])]; save.write(); }
+    setTool(fresh[0].id === 'awning' ? 'protect' : fresh[0].id);
+  };
+}
 function renderTools() {
   const L = S.L;
   const el = $('tools');
-  el.innerHTML = TOOLS.map(t => {
-    const dis = (t.req && !L[t.req]) || (t.id === 'tie' && L.maxTies === 0);
+  const pub = L.house.style === 'pub';
+  el.innerHTML = TOOLS.filter(t => toolAvailable(t, L)).map(t => pub && t.id === 'protect' ? { ...t, name: 'Awning', price: `£${BOARDUP.cost} a window · no plywood at the pub` } : t).map(t => {
+    const dis = false;
     const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : t.id === 'hatch' ? (L.monster === 'hide' ? 'No digging here' : 'Nothing in the drains here') : ['wheel', 'zip', 'chute'].includes(t.id) ? 'Not on this job' : 'Later jobs') : t.price;
-    return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
+    return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${pub && t.id === 'protect' ? ICON.awning : ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
   }).join('') + `<hr><div class="mini"><button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button><button id="clearBtn" title="Remove everything">Clear</button></div><div class="mini"><button id="orderBtn" class="${S.showOrder ? 'on' : ''}" title="List the order the crew puts pieces up, and change it">Order list</button></div>`;
   el.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setTool(b.dataset.tool); }));
   $('undoBtn').onclick = undo;
@@ -376,7 +425,7 @@ function updateHelp() {
     tie: '<b>Click</b> a joint next to solid wall (blue dots) to tie it in. Ties stop sway but carry no weight.',
     ladder: '<b>Click</b> the foot (ground or a boarded platform), then the top. The top must land on boards. Dave only climbs ladders.',
     trap: `<b>Click or drag</b> along a tube to lay a fake board. It looks real but gives way under anyone. A chav who drops ${SAFE_FALL} m or less lies there dazed and the police pay ${fmt(TRAP_REWARD)} for them. Any higher and you get sued. Dave avoids trap boards if there's another way up.`,
-    protect: `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${glz()} glazier). Windows marked ⚠ are in the firing line.`,
+    protect: S.L && S.L.house.style === 'pub' ? `<b>Click</b> a window to put a striped canvas awning over it (£${BOARDUP.cost}). The landlord won't have plywood on his pub, but an awning catches anything dropped from above. Windows marked ⚠ are in the firing line.` : `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${glz()} glazier). Windows marked ⚠ are in the firing line.`,
     hatch: `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
     wheel: '<b>Click</b> a joint at platform height or above to fit the gin wheel. The rope must hang clear to the ground, so put it on an arm sticking out past the scaffold. Loads are swung onto the nearest board within 1.5 m.',
     zip: '<b>Click</b> a joint at platform level, next to a board, to anchor the zip wire. The wire runs to the pub and pulls that joint sideways, hard.',
@@ -488,7 +537,7 @@ function refreshDocket() {
   const traps = S.pieces.filter(p => p.type === 'trap').length;
   if (L.chavs) items.push(['info', chavsUp ? `${Math.max(1, unlocked)} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : groundLadders.length ? 'Ladders locked: chavs stay on the ground' : 'No ladders yet: chavs stay on the ground']);
   const unprot = [...(S.risk || [])].filter(i => !S.pieces.some(p => p.type === 'protect' && p.a[0] === i)).length;
-  if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? 'Windows in the firing line boarded' : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${glz()} each if smashed`]);
+  if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? (L.house.style === 'pub' ? 'Awnings over the windows in the firing line' : 'Windows in the firing line boarded') : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${glz()} each if smashed`]);
   for (const [ok, t] of req.event || []) items.push([ok, t]);
   if (L.monster === 'hide') items.push(['info', "Churchyard: no trap doors. Dave will climb up and pull his ladder up. The Gobbler will shake the scaffold"]);
   if (L.toolHatch) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
@@ -641,9 +690,14 @@ cvs.addEventListener('pointerdown', (ev) => {
       else if (n) downInfo.hint = 'Stand ladders on the ground or on a boarded platform';
     }
   } else if (S.tool === 'board' || S.tool === 'deck' || S.tool === 'trap') {
+    // only start laying boards on a tube that can take one (or along boards already there, to extend them);
+    // anywhere else the drag moves the view, and a plain tap explains why nothing happened
     const seg = boardSegAt(pt);
-    S.paint = { y: seg ? seg.a[1] : null, done: new Set() };
-    if (seg) { S.paint.done.add(seg.a[0]); tryPlace(seg); }
+    const err = seg ? validatePlacement(S.L, S.pieces, seg) : null;
+    if (seg && (!err || /already/i.test(err))) {
+      S.paint = { y: seg.a[1], done: new Set([seg.a[0]]) };
+      if (!err) tryPlace(seg);
+    } else { S.paint = null; if (err) downInfo.hint = err; }
   }
   // a press (mouse or finger) that didn't grab anything drags the view instead
   downInfo.canPan = !S.drag && !(S.paint && S.paint.y !== null);
@@ -940,7 +994,7 @@ function loadLevel(i) {
   const bar = $('bar');
   bar.querySelectorAll('.tick').forEach(t => t.remove());
   for (const [f, s] of [[0.7, '★★★'], [0.85, '★★']]) { const t = document.createElement('div'); t.className = 'tick'; t.style.left = f * 100 + '%'; t.innerHTML = `<span>${s}</span>`; bar.appendChild(t); }
-  if (!TOOLS.some(t => t.id === S.tool && (!t.req || L[t.req]))) S.tool = 'tube';
+  if (!TOOLS.some(t => t.id === S.tool && toolAvailable(t, L))) S.tool = 'tube';
   renderTools();
   setTool(S.tool);
   afterEdit();
@@ -1005,6 +1059,7 @@ function enterDesign() {
   afterEdit();
   updateHelp();
   sfx.wind(0);
+  introduceKit();
 }
 function currentLevel() { return S.L; }
 
@@ -1038,6 +1093,7 @@ function startTest() {
   if (!S.req) return;
   sfx.unlock(); sfx.clank(1);
   S.mode = 'test';
+  if ($('kitIntro')) $('kitIntro').hidden = true;
   S.trial = new Trial(S.L, cleanPieces(S.pieces));
   S.trial.skipDeliveries = !S.req.ok;
   S.trial.unfinished = !S.req.ok;
@@ -1205,6 +1261,28 @@ function showResult() {
 // ---------------------------------------------------------------------------
 const pileLocal = () => new THREE.Vector3(S.L.W + 3.4 - 0.2, 0.4, 4.8);
 const ZOFF_MAX = 2.2;
+const isChavRd = (r) => typeof r.key === 'string' && r.key.startsWith('chav');
+// Anyone standing where the wreckage (or a flying ragdoll, or a dropped load) comes down gets knocked flat.
+function knockPeople(tr, hitters, L) {
+  const hitBy = (x, y, z) => hitters.find(h => Math.abs(h.x - x) < 0.45 && h.y > y - 0.1 && h.y < y + 1.9 && Math.abs(h.z - z) < 0.9);
+  const engine = [[tr.builder, tr.builder.who === 'agency' ? kevin : dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)]), ...tr.visitors.map(v => [v, visitorMesh(v)])];
+  for (const [p, mesh] of engine) {
+    if (!p.visible || !mesh.visible || p.ragdolled || ['falling', 'flat', 'gone', 'zip'].includes(p.state)) continue;
+    const h = hitBy(p.x, p.y, mesh.position.z);
+    if (!h || h.src === p) continue;
+    p.tangled = false; p.knocked = true;
+    tr._fall(p, (h.vx || 0) * 0.6 + (Math.random() - 0.5), Math.max(0, h.vy || 0) * 0.3 + 1);
+  }
+  // Sheila isn't in the sim; she goes down on her own
+  if (sheila.active && sheila.p && !sheila.p.ragdolled && sheila.mesh.visible) {
+    const P = sheila.p, h = hitBy(P.x, P.y, sheila.mesh.position.z);
+    if (h) {
+      const rd = spawnRagdoll(sheila.mesh, P, L, { x: (h.vx || 0) * 0.6, y: 1.5, z: 0.6 });
+      sheila.active = false; sheila.mesh.visible = false;
+      shout(sheila.cls === 'landlord' ? 'MY PUB!' : 'OOH!', P.x, P.y + 2.2, sheila.cls);
+    }
+  }
+}
 function stepTest(dt) {
   const tr = S.trial, L = S.L;
   if (!tr) return;
@@ -1252,7 +1330,12 @@ function stepTest(dt) {
   // party: a kick drum on the beat
   if (tr.ev && tr.ev.type === 'party' && tr.ev.partyT >= 0 && tr.ev.partyT <= S.L.event.dur) {
     const beatN = Math.floor(tr.ev.beat / (2 * Math.PI));
-    if (beatN !== S.lastBeat) { S.lastBeat = beatN; sfx.kick(); if (beatN % 4 === 0) shout('♪', S.L.W / 2 + (Math.random() - 0.5) * 4, S.L.zones[0].y + 2.3, 'bonus'); }
+    if (beatN !== S.lastBeat) {
+      S.lastBeat = beatN;
+      const f = S.L.event.beat * (1 + 0.25 * Math.min(1, tr.ev.partyT / S.L.event.dur));
+      sfx.disco(beatN, 1 / (f * Math.max(1, S.speed)));
+      if (beatN % 4 === 0) shout(['♪', '♫', '♬'][beatN % 3], S.L.W / 2 + (Math.random() - 0.5) * 5, S.L.zones[0].y + 2.3, 'bonus');
+    }
   }
   // piece placement sounds
   if (tr.phase === 'build' && tr.idx !== S.lastIdx) {
@@ -1276,7 +1359,7 @@ function stepTest(dt) {
     }
   } else S.crashed = false;
   // people who come off become ragdolls
-  const people = [[tr.builder, dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)])];
+  const people = [[tr.builder, tr.builder.who === 'agency' ? kevin : dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)]), ...tr.visitors.map(v => [v, visitorMesh(v)])];
   for (const [p, mesh] of people) {
     if ((p.state === 'falling' || p.state === 'flat') && !p.ragdolled && mesh.visible) {
       const sim = tr.sim;
@@ -1287,7 +1370,8 @@ function stepTest(dt) {
       const vel = { x: p.vx || 0, y: p.tangled ? (p.vy || 0) : -1, z: 0.3 };
       const rd = spawnRagdoll(mesh, p, L, vel, tangle);
       if (p.who === 'chav') rd.chavMesh = mesh;
-      shout(p.who === 'dave' ? 'AAARGH!' : 'OI!', p.x, p.y + 2);
+      if (p.bike) bike.visible = false;
+      shout(p.who === 'dave' ? 'AAARGH!' : p.who === 'chav' ? 'OI!' : ['WHOA!', 'MY DRINK!', 'NOT AGAIN!', 'OOF!'][(p.id || 0) % 4], p.x, p.y + 2);
     }
   }
   const sdt = Math.min(0.033, dt * Math.min(S.speed, 2));
@@ -1296,12 +1380,13 @@ function stepTest(dt) {
     r.life = (r.life || 0) + dt;
     if (!r.dead && r.life > 0.8 && (r.still > 0.25 || r.life > 3)) {
       r.dead = true;
-      if (r.key === 'dave' || (r.person && r.person.dead)) comicDeath(r);
-      else { shout(`+${fmt(TRAP_REWARD)} REWARD`, r.center.x, r.center.y + 1.6, 'bonus'); sfx.fanfare(); }
+      if (r.key === 'dave' || r.key === 'agency' || (r.person && r.person.dead)) comicDeath(r);
+      else if (isChavRd(r)) { shout(`+${fmt(TRAP_REWARD)} REWARD`, r.center.x, r.center.y + 1.6, 'bonus'); sfx.fanfare(); }
+      else shout(r.key === 'sheila' ? 'MY HIP!' : r.key === 'landlord' ? "YOU'RE ALL BARRED" : 'OW…', r.center.x, r.center.y + 1.4);
     }
   }
   // chavs lying dazed or stuck in the wreckage: somebody's called the police
-  const stuck = ragdolls.filter(r => r.key !== 'dave' && r.dead && !r.queued && !(r.person && r.person.dead));
+  const stuck = ragdolls.filter(r => isChavRd(r) && r.dead && !r.queued && !(r.person && r.person.dead));
   if (stuck.length && !police.active) { S.policeWait = (S.policeWait || 0) + dt; if (S.policeWait > 1.2) { S.policeWait = 0; startPolice(stuck, L); } }
   // anything moving fast knocks the scenery about
   const hitters = [];
@@ -1312,9 +1397,9 @@ function stepTest(dt) {
     if (sp > 1.0) hitters.push({ x: n.x, y: n.y, z: Z_MID + (S.zoff[n.id] || 0), vx: n.vx, vy: n.vy });
   }
   for (const d of debris) if (!d.rest && !d.noHit && Math.hypot(d.vx, d.vy) > 1.5) hitters.push({ x: d.mesh.position.x, y: d.mesh.position.y, z: d.mesh.position.z, vx: d.vx, vy: d.vy });
-  for (const r of ragdolls) if (r.speed > 2) hitters.push({ x: r.center.x, y: r.center.y, z: r.center.z, vx: 0, vy: -2 });
+  for (const r of ragdolls) if (r.speed > 2) hitters.push({ x: r.center.x, y: r.center.y, z: r.center.z, vx: 0, vy: -2, src: r.person });
   for (const it of tr.items) if (it.state === 'falling' && it.zoneY === null && Math.abs(it.vy) > 2) hitters.push({ x: it.x, y: it.y, z: Z_MID, vx: 0, vy: it.vy });
-  if (hitters.length) checkBreakables(hitters);
+  if (hitters.length) { checkBreakables(hitters); knockPeople(tr, hitters, L); }
   // chavs jumping about in front of a window
   for (const c of tr.chavs) if (c.state === 'bounce' && c.t > 1) {
     const i = windowInFront(S.L, c.x, c.zy ?? Math.round(c.y), 0.2);
@@ -1331,7 +1416,7 @@ function stepTest(dt) {
   S.dusk = (S.dusk || 0) + (duskT - (S.dusk || 0)) * Math.min(1, dt * S.speed * 0.4);
   if (tr.phase === 'done') {
     S.resultT += dt;
-    const waitPolice = (police.active || ragdolls.some(r => r.key !== 'dave' && !r.queued && !(r.person && r.person.dead))) && S.resultT < 30;
+    const waitPolice = (police.active || ragdolls.some(r => isChavRd(r) && !r.queued && !(r.person && r.person.dead))) && S.resultT < 30;
     if (S.resultT > (ragdolls.length ? 4 : 1.1) && !waitPolice && $('result').hidden) showResult();
   }
   testStatus();
@@ -1343,7 +1428,7 @@ function eventFx(ev, L, tr) {
   if (ev.type === 'hoist' && ev.what === 'lift') { sfx.clank(0.5); say('HEAVE!', L.W - 1, 2.4); }
   else if (ev.type === 'party') {
     if (ev.what === 'music') { say('♪ DROP THE BEAT ♪', L.W / 2, zy + 2.6, 'bonus', 2.5); sfx.fanfare(); }
-    if (ev.what === 'end') say('HAPPY BIRTHDAY TEZ!', L.W / 2, zy + 2.6, 'bonus', 2.5);
+    if (ev.what === 'end') { say('HAPPY BIRTHDAY TEZ!', L.W / 2, zy + 2.6, 'bonus', 3); sfx.birthday(); }
   } else if (ev.type === 'zip') {
     if (ev.what === 'go') { say(ev.name === 'Sheila' ? 'WHEEEEE!' : ev.name === 'The vicar' ? 'LORD ABOVE!' : 'GERONIMOOO!', L.W, zy + 2.4, '', 2); sfx.snap(); }
   } else if (ev.type === 'chute') {
@@ -1635,6 +1720,7 @@ function frameBody(now) {
   updateGhosts(dt, S.t);
   updatePolice(dt, S.t);
   hatchView(dt);
+  sceneryTick(dt);
   snowView(S.L, dt, S.t);
   fireworksView(dt);
   updateSheila(dt, S.t, S.mode === 'test' && S.trial ? { x: dave.position.x, y: dave.position.y, visible: dave.visible } : null);
@@ -1659,7 +1745,7 @@ function frameBody(now) {
   if (window.__DEBUG_DESIGN) {
     const { level, pieces, test } = window.__DEBUG_DESIGN;
     window.__proj = (x, y) => { const v = new THREE.Vector3(x, y, Z_OUT); root.localToWorld(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight]; };
-    window.__S = S; window.__brk = () => breakables.filter(b => b.broken).map(b => b.kind); window.__fx = () => [ghosts.length, ragdolls.length, police.state, police.queue.length];
+    window.__dbg = { sheilaSmash, sheila, knockPeople, ragdolls }; window.__S = S; window.__brk = () => breakables.filter(b => b.broken).map(b => b.kind); window.__fx = () => [ghosts.length, ragdolls.length, police.state, police.queue.length];
     loadLevel(level);
     if (pieces) { S.pieces = cleanPieces(pieces); afterEdit(); }
     enterDesign();

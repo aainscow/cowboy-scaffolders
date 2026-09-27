@@ -200,6 +200,7 @@ const STYLES = {
   tyler: { top: 0x19a974, sleeve: 0x19a974, legs: 0x2b3f6b, shoe: 0xf6f6f6, hat: 'helmet', hatCol: 0xd8203a, skin: 0xe0a987, stripe: 0xffffff, scale: 0.82 },
   santa: { top: 0xc8102e, sleeve: 0xc8102e, legs: 0xc8102e, shoe: 0x111111, hat: 'santa', hatCol: 0xc8102e, skin: 0xf0c4a4, stripe: 0xffffff, beard: true },
   astro: { top: 0xeeeeee, sleeve: 0xeeeeee, legs: 0xeeeeee, shoe: 0xaaaaaa, hat: 'astro', hatCol: 0xffffff, skin: 0xe0a987, stripe: 0x1f3b73 },
+  landlord: { top: 0xf4f2ec, sleeve: 0xf4f2ec, legs: 0x2a2d33, shoe: 0x1b1b1b, hat: 'bald', hatCol: 0x6b4a2e, skin: 0xe8a888, stripe: 0x1f3b2c, apron: 0x1f3b2c, tache: true, scale: 1.1 },
   chav3: { top: 0x161616, sleeve: 0x161616, legs: 0x161616, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xb0122a, skin: 0xd79e7a, stripe: 0xffffff, can: 0xffd12d },
 };
 const personMats = {};
@@ -238,6 +239,9 @@ function addHat(parent, st, mt, part) {
     const glassy = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.3, clearcoat: 1 });
     part(new THREE.SphereGeometry(0.21, 20, 14), glassy, 0, 0.0, 0, parent);
     part(new THREE.SphereGeometry(0.17, 18, 12, -0.9, 1.8, 0.9, 1.1), new THREE.MeshStandardMaterial({ color: 0xd4a843, metalness: 1, roughness: 0.15 }), 0, 0.0, 0.06, parent);
+  } else if (st.hat === 'bald') {
+    // a shiny dome with a fringe round the back
+    part(new THREE.SphereGeometry(0.13, 14, 8, Math.PI * 0.6, Math.PI * 0.8, Math.PI * 0.35, Math.PI * 0.3), mt.hat, 0, 0, -0.01, parent).scale.set(1.05, 1.05, 1.1);
   } else if (st.hat === 'curlers') {
     // a perm in progress: hair plus a row of rollers
     part(new THREE.SphereGeometry(0.14, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), mt.hat, 0, 0.0, -0.01, parent).scale.set(1.05, 1.1, 1.08);
@@ -289,6 +293,13 @@ function makePerson(key) {
   part(new THREE.SphereGeometry(0.014, 6, 6), mt.eye, 0.045, 0.03, 0.115, head);
   addHat(head, st, mt, part);
   if (st.beard) { part(new THREE.SphereGeometry(0.12, 12, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), 0, -0.1, 0.07, head).scale.set(1, 1.2, 0.8); }
+  if (st.tache) { part(new THREE.BoxGeometry(0.13, 0.03, 0.03), new THREE.MeshStandardMaterial({ color: 0x4a3322, roughness: 1 }), 0, -0.045, 0.125, head); for (const sx of [-1, 1]) part(new THREE.BoxGeometry(0.03, 0.06, 0.03), new THREE.MeshStandardMaterial({ color: 0x4a3322 }), sx * 0.07, -0.07, 0.12, head); }
+  if (st.apron) {
+    const ap = new THREE.MeshStandardMaterial({ color: st.apron, roughness: 0.9 });
+    part(new THREE.BoxGeometry(0.38, 0.7, 0.02), ap, 0, 0.12, 0.135, torso);
+    part(new THREE.BoxGeometry(0.46, 0.03, 0.28), ap, 0, 0.2, 0, torso);
+    part(new THREE.BoxGeometry(0.12, 0.02, 0.4), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0.2, 0.62, 0.02, torso);   // bar towel over the shoulder
+  }
   if (st.collar) part(new THREE.BoxGeometry(0.06, 0.03, 0.02), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.66, 0.135, torso);
   const arms = [];
   for (const s of [-1, 1]) {
@@ -338,9 +349,9 @@ function animatePerson(g, p, dt, t) {
   const moving = Math.hypot(p.x - A.lastX, p.y - A.lastY, pz - (A.lastZ ?? pz)) / Math.max(dt, 1e-4);
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
   const riding = p.bike && (p.state === 'appear' || p.state === 'ride' || p.state === 'fly');
-  const st = p.dance ? 'bounce' : p.state === 'zip' ? 'hang' : riding ? 'ride' : p.state;
+  const st = p.dance ? 'dance' : (p.state === 'zip' || p.state === 'swinghang') ? 'hang' : riding ? 'ride' : p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
-  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride'].includes(st) ? st : p.mode;
+  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride', 'dance'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
   const groundZ = isDave ? 2.4 : 2.55 + (p.id || 0) * 0.14;
   let x = p.x, y = p.y, zT = groundZ, yawT = p.face > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -352,6 +363,13 @@ function animatePerson(g, p, dt, t) {
   if (mode === 'hang') { zT = Z_OUT + 0.3; yawT = Math.PI; }
   if (mode === 'haul') { yawT = Math.PI; }
   if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52; yawT = Math.PI / 2; }
+  let move = 0;
+  if (mode === 'dance') {
+    move = ((p.id || 0) * 7 + Math.floor(((p.beat || t * 12) / (2 * Math.PI)) / 8)) % 6;
+    zT = Z_MID + ((p.id || 0) % 3 - 1) * 0.3;
+    yawT = [0, Math.sin(t * 2) * 0.8, 0.4 * Math.sign(Math.sin(t * 3)), 0.3, Math.PI * Math.sin(t * 0.8), 0][move];
+    if (move === 5) y += (p.hop || 0) * 0.3;
+  }
   if (mode === 'rattle') { yawT = Math.PI; zT = Z_OUT + 0.85; x = p.x; }
   A.z += (zT - A.z) * Math.min(1, dt * 8);
   A.yaw += wrapAngle(yawT - A.yaw) * Math.min(1, dt * 10);
@@ -359,7 +377,7 @@ function animatePerson(g, p, dt, t) {
   const ph = A.phase;
   const carrying = !!p.carrying;
   u.pivot.position.set(0, 0, 0); u.pivot.rotation.set(0, 0, 0);
-  u.body.rotation.set(0, 0, 0); u.body.position.set(0, 0, 0);
+  u.body.rotation.set(0, 0, 0); u.body.position.set(0, 0, 0); u.hips.rotation.set(0, 0, 0);
   u.torso.rotation.set(0, 0, 0); u.head.rotation.set(0, 0, 0);
   for (const a of u.arms) { a.sh.rotation.set(0, 0, 0); a.el.rotation.set(0, 0, 0); }
   for (const l of u.legs) { l.hp.rotation.set(0, 0, 0); l.kn.rotation.set(0, 0, 0); }
@@ -416,6 +434,34 @@ function animatePerson(g, p, dt, t) {
     for (const a of u.arms) { a.sh.rotation.x = -3.05; }
     u.legs[0].hp.rotation.x = -0.3 - (p.swing || 0) * 0.5; u.legs[1].hp.rotation.x = -0.1 - (p.swing || 0) * 0.6;
     u.legs[0].kn.rotation.x = 0.5; u.legs[1].kn.rotation.x = 0.3;
+  } else if (mode === 'dance') {
+    const b = p.beat || t * 12, s = Math.sin(b), s2 = Math.sin(b / 2), k = Math.abs(s);
+    const legsSway = (a) => { u.legs[0].hp.rotation.x = -a * s2; u.legs[1].hp.rotation.x = a * s2; u.legs[0].kn.rotation.x = u.legs[1].kn.rotation.x = 0.25 + 0.2 * k; };
+    if (move === 0) {          // disco: point up, point down
+      legsSway(0.25); u.arms[1].sh.rotation.x = s2 > 0 ? -2.9 : -0.4; u.arms[1].sh.rotation.z = s2 > 0 ? -0.4 : 0.3; u.arms[0].sh.rotation.z = 0.4; u.arms[0].el.rotation.x = -1.2;
+      u.hips.rotation.z = s2 * 0.15; u.torso.rotation.z = -s2 * 0.1;
+    } else if (move === 1) {   // the twist
+      for (const l of u.legs) { l.hp.rotation.x = -0.5; l.kn.rotation.x = 0.9 + 0.2 * k; }
+      u.body.position.y = -0.18 + 0.05 * k; u.torso.rotation.y = s * 0.6; u.hips.rotation.y = -s * 0.4;
+      u.arms[0].sh.rotation.z = 1.2; u.arms[1].sh.rotation.z = -1.2; u.arms[0].el.rotation.x = u.arms[1].el.rotation.x = -1.0;
+    } else if (move === 2) {   // the robot
+      const st2 = Math.round(s2 * 2) / 2;
+      u.arms[0].sh.rotation.x = -1.4 - st2 * 0.6; u.arms[1].sh.rotation.x = -1.4 + st2 * 0.6; u.arms[0].el.rotation.x = u.arms[1].el.rotation.x = -1.57;
+      u.head.rotation.y = st2 * 0.6; u.torso.rotation.y = -st2 * 0.2; legsSway(0.1);
+    } else if (move === 3) {   // air guitar
+      u.torso.rotation.x = 0.3 + 0.15 * k; u.head.rotation.x = 0.3 * s;
+      u.arms[0].sh.rotation.x = -0.9; u.arms[0].sh.rotation.z = 0.6; u.arms[0].el.rotation.x = -1.3;
+      u.arms[1].sh.rotation.x = -0.6 + s * 0.4; u.arms[1].el.rotation.x = -1.0;
+      u.legs[0].hp.rotation.x = -0.4; u.legs[1].hp.rotation.x = 0.35; u.legs[0].kn.rotation.x = 0.5;
+    } else if (move === 4) {   // the sprinkler
+      u.arms[0].sh.rotation.x = -1.57; u.arms[0].el.rotation.y = 1.4; u.arms[0].sh.rotation.y = s2 * 0.6;
+      u.arms[1].sh.rotation.x = -1.57; u.arms[1].sh.rotation.z = -0.2; u.arms[1].sh.rotation.y = s2 * 0.6;
+      legsSway(0.2);
+    } else {                   // hands in the air
+      u.legs[0].kn.rotation.x = u.legs[1].kn.rotation.x = (1 - (p.hop || 0)) * 0.7;
+      u.legs[0].hp.rotation.x = u.legs[1].hp.rotation.x = -(1 - (p.hop || 0)) * 0.4;
+      u.arms[0].sh.rotation.z = 2.5 + s * 0.3; u.arms[1].sh.rotation.z = -2.5 - s * 0.3;
+    }
   } else if (mode === 'haul') {
     const s = Math.sin(t * 5);
     u.arms[0].sh.rotation.x = -2.6 + s * 0.9; u.arms[1].sh.rotation.x = -2.6 - s * 0.9;
@@ -1033,7 +1079,13 @@ const SHEILA_LINES = [
   'Look at the STATE of it!', "Don't you wave at me!", 'My Derek fitted that!', "I've got bingo tonight!", 'Cowboys, the lot of you!',
   "I'm writing to the council!", 'And the paper!', 'Bricks in my BATH!',
 ];
-const sheila = { active: false, state: 'idle', p: null, t: 0, rant: 0, lineT: 0, line: 0, level: null };
+const landlordMesh = makePerson('landlord'); landlordMesh.visible = false; root.add(landlordMesh);
+const LANDLORD_LINES = [
+  "OI! THAT'S MY WINDOW!", "You're BARRED!", 'All of you! Barred!', "That's going on your tab, Terry!", "Thirty years I've run this pub!",
+  'I had that glass etched!', "I've got the quiz on Thursday!", "Not so much as a PACKET OF CRISPS!", 'The brewery will hear about this!', 'Last orders for YOU, sunshine!',
+  'Get off my scaffolding! It is MY scaffolding now!', 'Cowboys, the lot of you!',
+];
+const sheila = { active: false, state: 'idle', p: null, t: 0, rant: 0, lineT: 0, line: 0, level: null, mesh: sheilaMesh, lines: SHEILA_LINES, cls: 'sheila' };
 function sheilaSmash(level, wx) {
   const S2 = sheila;
   if (!level || !level.house) return;
@@ -1041,10 +1093,12 @@ function sheilaSmash(level, wx) {
   if (S2.active && S2.state !== 'in') { S2.lineT = 0; return; }
   const h = level.house;
   const doorX = h.door ? h.door.x + h.door.w / 2 : h.x0 + 0.4;
+  const pub = h.style === 'pub';
+  S2.mesh = pub ? landlordMesh : sheilaMesh; S2.lines = pub ? LANDLORD_LINES : SHEILA_LINES; S2.cls = pub ? 'landlord' : 'sheila';
   if (!S2.p) S2.line = Math.floor(Math.random() * 3);
-  S2.p = { who: 'sheila', id: 0, visible: true, x: doorX, y: level.groundAt(doorX), z: 0.2, state: 'walk', mode: 'ground', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1 };
+  S2.p = { who: pub ? 'landlord' : 'sheila', id: 0, visible: true, x: doorX, y: level.groundAt(doorX), z: 0.2, state: 'walk', mode: 'ground', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1 };
   Object.assign(S2, { active: true, state: 'out', t: 0, lineT: 0.3, level, wx, doorX });
-  sheilaMesh.visible = true;
+  S2.mesh.visible = true;
 }
 function updateSheila(dt, t, davePos) {
   const S2 = sheila;
@@ -1071,19 +1125,19 @@ function updateSheila(dt, t, davePos) {
     P.yaw = Math.atan2(tx - P.x, Z_MID - P.z);   // square up to him
     S2.rant -= dt; S2.lineT -= dt;
     if (S2.lineT <= 0) {
-      const l = typeof shout === 'function' ? shout(SHEILA_LINES[S2.line % SHEILA_LINES.length], P.x, P.y + 2.3, 'sheila', P.z) : null;
+      const l = typeof shout === 'function' ? shout(S2.lines[S2.line % S2.lines.length], P.x, P.y + 2.3, S2.cls, P.z) : null;
       if (l) l.life = 2.2;
       S2.line++; S2.lineT = 2.0;
       if (typeof sfx !== 'undefined' && sfx.nag) sfx.nag();
     }
-    if (S2.rant <= 0) { S2.state = 'in'; const l = typeof shout === 'function' ? shout('HMPH!', P.x, P.y + 2.3, 'sheila', P.z) : null; if (l) l.life = 1.6; }
+    if (S2.rant <= 0) { S2.state = 'in'; const l = typeof shout === 'function' ? shout(S2.cls === 'landlord' ? 'AND STAY OUT!' : 'HMPH!', P.x, P.y + 2.3, S2.cls, P.z) : null; if (l) l.life = 1.6; }
   } else if (S2.state === 'in') {
     P.state = 'walk';
     if (Math.abs(P.x - S2.doorX) > 0.05 && P.z > 3) walk(S2.doorX, 3.4, 1.9);
-    else if (walk(S2.doorX, 0.1, 1.9)) { S2.active = false; S2.state = 'idle'; sheilaMesh.visible = false; if (typeof sfx !== 'undefined') sfx.thunk(); return; }
+    else if (walk(S2.doorX, 0.1, 1.9)) { S2.active = false; S2.state = 'idle'; S2.mesh.visible = false; if (typeof sfx !== 'undefined') sfx.thunk(); return; }
   }
   P.y = L.groundAt(P.x);
-  animatePerson(sheilaMesh, P, dt, t);
+  animatePerson(S2.mesh, P, dt, t);
 }
 // ---------------------------------------------------------------------------
 //  The Drain Gobbler: a squat green thing with too many eyes that lives in the
@@ -1187,7 +1241,7 @@ function resetMonsterView() {
 }
 const kevin = makePerson('agency'); kevin.visible = false; root.add(kevin);
 
-function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p: null, rant: 0 }); sheilaMesh.visible = false; }
+function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p: null, rant: 0 }); sheilaMesh.visible = false; landlordMesh.visible = false; }
 
 function resetPolice() {
   police.active = false; police.done = false; police.queue = []; police.state = 'idle';

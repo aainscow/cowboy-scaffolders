@@ -23,7 +23,7 @@ export const RAW2 = {
   13: () => {
     const d = frame(D(), [3, 5, 6, 8], [0, 2, 4, 6], { type: 'tube' });
     d.t([8, 6], [9, 6], 'heavy').t([8, 4], [9, 6], 'heavy');
-    d.tie(3, 6).tie(5, 6).tie(6, 6).tie(8, 6).tie(8, 4).tie(8, 2);
+    d.tie(3, 6).tie(6, 6).tie(8, 6).tie(8, 3).tie(3, 3);
     d.bd(3, 8, 6).bd(3, 5, 4).lad(3, 0, 4).lad(3, 4, 6);
     d.ps.push({ type: 'wheel', a: [9, 6] });
     return d.ps;
