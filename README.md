@@ -15,7 +15,24 @@ Big Terry's rule: *as long as it doesn't fall down, it's fine.*
 - **Something lives in the drains** on jobs 1, 4, 7 and 10. After dark the Drain Gobbler crawls out of the manhole and heads for Dave. Dig a **trap door** (£30) in the pavement and it drops into the secret basement and gets sent back to the Underneath. Otherwise it eats Dave, and the agency charges £100 to send Jeff.
 - Collapses take the house with them: windows, gutters, pots and gnomes. Dave gets tangled in the tubes and ascends.
 
-12 jobs, with tighter quotes, heavier loads and more chavs as you go. Stars for coming in well under the quote.
+24 jobs, with tighter quotes, heavier loads and more chavs as you go. Stars for coming in well under the quote.
+
+Jobs 13–24 each do something with the top platform beyond loading it:
+
+| Job | Where | What happens |
+| --- | --- | --- |
+| 13 Hoist Away | Old corn mill | Loads come up on a gin wheel at the end of a cantilever arm; the rope pulls down twice the load |
+| 14 Terry's 50th | The Scaffolders Arms | Ten guests dance in time on the platform; floppy scaffolds rock themselves apart |
+| 15 Sanctuary | Church at night | No trap doors in a churchyard: Dave climbs up and pulls the ladder up, and the Drain Gobbler shakes the scaffold |
+| 16 Down the Chute | Abbey | Roofers drop rubble onto the platform; hang a chute over the skip or it lands on the Bishop's car |
+| 17 Last Orders | Village hall | A zip wire to the pub across the road pulls the top of the scaffold sideways |
+| 18 Pedal Power | Leisure centre | A BMX rides along the platform and off the end; where the platform stops decides whether he hits the paddling pool |
+| 19 Remember, Remember | Cathedral close, night | Fireworks from the platform; stray rockets go for £300 stained glass |
+| 20 Christmas Eve | Snowy terrace | Father Christmas lands on the platform and skids to a stop: needs a long runway and bracing against the shove |
+| 21 Ring Out | Cathedral tower | A 900 kg bell up to the belfry, past a flying buttress |
+| 22 Glass Act | Skyscraper | 12 m up in the wind, ties only at the floor slabs |
+| 23 Penthouse Party | Skyscraper | The dance party again, 9 m up in the wind |
+| 24 Launch Day | Rocket pad | A crew access tower up to the capsule that has to survive the lift-off blast |
 
 Controls:
 - **Desktop:** click two dots to place a piece; hold and drag through dots to lay a chain of tubes. Drag empty space to pan, right-drag to orbit, wheel to zoom (or WASD/arrows and the on-screen pad). Ctrl+Z undoes.
@@ -27,8 +44,9 @@ Plain JavaScript + [three.js](https://threejs.org) (loaded from a CDN), no build
 
 | Path | What |
 | --- | --- |
+| `src/events.js` | The special jobs (hoist, party, zip wire, chute, BMX, sleigh, fireworks, launch) and the people who climb up for them |
 | `src/engine.js` | 2D XPBD structural sim (members, semi-rigid couplers, base plates, ties, buckling, board capacity) and the trial runner: construction sequence, Dave's deliveries, chav AI |
-| `src/levels.js` | The 12 jobs |
+| `src/levels.js` | The 24 jobs |
 | `src/g1_world.js` … `src/g4_game.js` | Renderer, scenery, people/ragdolls/police, UI and game flow |
 | `src/shell.html` | Page markup and CSS |
 | `build.py` | Bundles everything into `dist/index.html` (artifact body) and `docs/index.html` (standalone page for GitHub Pages) |

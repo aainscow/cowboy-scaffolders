@@ -130,6 +130,52 @@ function syncHatches(L, pieces) {
   levelGroup.add(g);
   manhole = { g, cover, open: 0 };
 }
+// Gin wheel, zip wire anchor and rubble chute, as placed in the design.
+const eventPieces = { wheel: null, cable: null, chute: null, anchor: null };
+const orangeM = new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.6 });
+function syncEventPieces(L, pieces) {
+  for (const k of Object.keys(eventPieces)) { const m = eventPieces[k]; if (m && m.parent) m.parent.remove(m); eventPieces[k] = null; }
+  const E = L.event;
+  if (!E) return;
+  const w = pieces.find(p => p.type === 'wheel');
+  if (w) {
+    const g = new THREE.Group(); g.position.set(w.a[0], w.a[1] + 0.18, Z_OUT + 0.15);
+    const wh = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 8, 20), M.iron); g.add(wh);
+    for (let i = 0; i < 3; i++) { const sp = box(0.3, 0.02, 0.02, M.iron, 0, 0, 0, g, false); sp.rotation.z = i * Math.PI / 3; }
+    const hook = box(0.05, 0.25, 0.05, M.iron, 0, 0.22, 0, g, false);
+    levelGroup.add(g); eventPieces.wheel = g;
+  }
+  const z = pieces.find(p => p.type === 'zip');
+  if (z && E.type === 'zip') {
+    const a = box(0.3, 0.3, 0.12, orangeM, z.a[0], z.a[1] + 0.2, Z_OUT + 0.3, levelGroup);
+    eventPieces.anchor = a;
+    const tx = L.W + E.dx, ty = E.y + 2.2;
+    const x0 = z.a[0], y0 = z.a[1] + 0.2, z0 = Z_OUT + 0.3, z1 = -2.4;
+    const dx = tx - x0, dy = ty - y0, dz = z1 - z0, len = Math.hypot(dx, dy, dz);
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, len, 5), new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.7, roughness: 0.35 }));
+    c.position.set((x0 + tx) / 2, (y0 + ty) / 2, (z0 + z1) / 2);
+    c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / len, dy / len, dz / len));
+    levelGroup.add(c); eventPieces.cable = c;
+  }
+  const ch = pieces.find(p => p.type === 'chute');
+  if (ch && E.type === 'chute') {
+    const g = new THREE.Group(); g.userData = { x: ch.a[0], y: ch.a[1] };
+    const top = { x: ch.a[0] + 0.1, y: ch.a[1] + 0.1, z: Z_OUT + 0.3 }, bot = { x: ch.a[0] + 0.15, y: 1.15, z: 2.3 };
+    const n = Math.max(3, Math.round((top.y - bot.y) / 0.9));
+    for (let i = 0; i < n; i++) {
+      const k0 = i / n, k1 = (i + 1) / n;
+      const ax = top.x + (bot.x - top.x) * k0, ay = top.y + (bot.y - top.y) * k0, az = top.z + (bot.z - top.z) * k0;
+      const bx = top.x + (bot.x - top.x) * k1, by = top.y + (bot.y - top.y) * k1, bz = top.z + (bot.z - top.z) * k1;
+      const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.2, len * 1.02, 12, 1, true), orangeM);
+      c.material.side = THREE.DoubleSide;
+      c.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+      c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(-dx / len, -dy / len, -dz / len));
+      c.castShadow = true; g.add(c);
+    }
+    levelGroup.add(g); eventPieces.chute = g;
+  }
+}
 function windowBreakable(i) { return breakables.find(b => b.kind === 'window' && b.wi === i); }
 function wallChunks(x, y) {
   const bm = new THREE.MeshStandardMaterial({ color: 0x9c4a33, roughness: 0.9 });
@@ -172,16 +218,30 @@ function disposeGroup(g) {
 function buildHouse(parent, h, opts = {}) {
   const g = new THREE.Group();
   parent.add(g);
-  const w = h.x1 - h.x0, depth = opts.depth ?? 8, eaves = h.eaves;
+  const churchy = h.style === 'church' || h.style === 'abbey' || h.style === 'cathedral';
+  const depth = opts.depth ?? (churchy ? 12 : h.style === 'tower' ? 14 : 8);
+  const w = h.x1 - h.x0, eaves = h.eaves;
   const cx = (h.x0 + h.x1) / 2;
-  const facade = texFromFacade(h.brick, w, eaves);
-  const side = texFromFacade(h.brick, depth, eaves);
+  const skin = h.style === 'tower' ? 'glass' : h.brick;
+  const facade = texFromFacade(skin, w, eaves);
+  const side = texFromFacade(skin, depth, eaves);
+  if (!opts.pitch && churchy) opts.pitch = h.style === 'cathedral' ? 7 : 5.2;
   const plinth = opts.base ?? 0;
   // main walls
   const body = new THREE.Mesh(new THREE.BoxGeometry(w, eaves - plinth, depth), [side, side, M.dark, M.dark, facade, side]);
   body.position.set(cx, plinth + (eaves - plinth) / 2, -depth / 2);
   body.castShadow = true; body.receiveShadow = true;
   g.add(body);
+  if (h.roof === 'flat') {
+    // parapet and coping; no pitched roof
+    box(w + 0.3, 0.5, depth + 0.3, h.style === 'tower' ? M.dark : M.sill, cx, eaves + 0.25, -depth / 2, g);
+    box(w + 0.4, 0.08, 0.4, M.sill, cx, eaves + 0.54, 0.05, g);
+    if (h.style === 'tower' && h.tieRows) for (let y = 3; y < Math.min(eaves, 60); y += 3) box(w + 0.06, 0.28, 0.1, new THREE.MeshStandardMaterial({ color: 0xb9b7b0, roughness: 0.8 }), cx, y, 0.02, g, false);
+    if (h.style === 'leisure') for (const [yy, col] of [[2.6, 0x1a6fb8], [2.85, 0x2dbf8a]]) box(w + 0.04, 0.22, 0.06, new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 }), cx, yy, 0.03, g, false);
+    (h.windows || []).forEach((wd, i) => addWindow(g, wd, h.brick, opts.main, i));
+    if (h.door) addDoor(g, h.door);
+    return g;
+  }
   // gable roof: ridge parallel to facade
   const pitch = opts.pitch ?? 3.4, over = 0.35;
   const roofMat = new THREE.MeshStandardMaterial({ map: (h.brick === 'stone' || h.brick === 'render') ? slateTex.clone() : tileTex.clone(), roughness: 0.8 });
@@ -208,6 +268,16 @@ function buildHouse(parent, h, opts = {}) {
     m.castShadow = true; g.add(m);
   }
   box(w + 2 * over, 0.14, 0.2, M.dark, cx, eaves + pitch + 0.05, -depth / 2, g);
+  if (opts.snow) {
+    const snowM = new THREE.MeshStandardMaterial({ color: 0xf6f8fb, roughness: 0.9 });
+    for (const sgn of [1, -1]) {
+      const slopeL = Math.hypot(depth / 2 + over, pitch);
+      const r = new THREE.Mesh(new THREE.BoxGeometry(w + 2 * over + 0.02, 0.14, slopeL * 0.96), snowM);
+      r.rotation.x = sgn * Math.atan2(pitch, depth / 2 + over);
+      r.position.set(cx, eaves + pitch / 2 + 0.12, -depth / 2 + sgn * (depth / 2 + over) / 2);
+      r.castShadow = true; g.add(r);
+    }
+  }
   // fascia + gutter
   box(w + 2 * over, 0.22, 0.04, M.white, cx, eaves - 0.02, over - 0.02, g);
   const gl = w + 2 * over, nseg = Math.max(1, Math.round(gl / 1.6));
@@ -239,8 +309,36 @@ function buildHouse(parent, h, opts = {}) {
   return g;
 }
 
+const stainedTex = canvasTex(128, 256, (g, w, h) => {
+  const cols = ['#b3202f', '#1f4fa8', '#e2b62d', '#2f8a45', '#7a2fa0', '#d86a1c'];
+  g.fillStyle = '#1a1a1a'; g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 16) for (let x = 0; x < w; x += 16) { g.fillStyle = cols[(x * 7 + y * 3 + ((x ^ y) >> 3)) % cols.length]; g.globalAlpha = 0.85; g.fillRect(x + 1.5, y + 1.5, 13, 13); }
+  g.globalAlpha = 1; g.strokeStyle = '#111'; g.lineWidth = 4; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.moveTo(0, h * 0.62); g.lineTo(w, h * 0.62); g.stroke();
+});
+const stainedMat = new THREE.MeshStandardMaterial({ map: stainedTex, roughness: 0.3, emissive: 0x442211, emissiveIntensity: 0.25 });
+function lancetShape(w, h) {
+  const s = new THREE.Shape(), r = w / 2, archH = w * 0.85;
+  s.moveTo(-r, 0); s.lineTo(r, 0); s.lineTo(r, h - archH);
+  s.quadraticCurveTo(r, h - archH * 0.3, 0, h); s.quadraticCurveTo(-r, h - archH * 0.3, -r, h - archH); s.lineTo(-r, 0);
+  return s;
+}
 function addWindow(g, wd, brick, reg, wi) {
   const { x, y, w, h } = wd;
+  if (wd.kind === 'lancet' || wd.kind === 'rose' || wd.kind === 'louvre') {
+    const cx = x + w / 2;
+    const geo = wd.kind === 'rose' ? new THREE.CircleGeometry(w / 2, 32) : new THREE.ShapeGeometry(lancetShape(w, h));
+    const uv = geo.attributes.uv, pos = geo.attributes.position;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + w / 2) / w, wd.kind === 'rose' ? (pos.getY(i) + w / 2) / w : pos.getY(i) / h);
+    const glass = new THREE.Mesh(geo, wd.kind === 'louvre' ? M.dark : stainedMat);
+    glass.position.set(cx, wd.kind === 'rose' ? y + h / 2 : y, 0.02); g.add(glass);
+    const surroundGeo = wd.kind === 'rose' ? new THREE.RingGeometry(w / 2, w / 2 + 0.14, 32) : (() => { const o = lancetShape(w + 0.28, h + 0.16); o.holes.push(lancetShape(w, h)); return new THREE.ShapeGeometry(o); })();
+    const sur = new THREE.Mesh(surroundGeo, M.sill); sur.position.set(cx, wd.kind === 'rose' ? y + h / 2 : y - 0.08, 0.03); sur.castShadow = true; g.add(sur);
+    const parts = [glass, sur];
+    if (wd.kind === 'louvre') for (let yy = y + 0.2; yy < y + h - 0.6; yy += 0.24) { const sl = box(w - 0.1, 0.05, 0.14, M.bark, cx, yy, 0.06, g, false); sl.rotation.x = 0.6; parts.push(sl); }
+    else parts.push(box(w + 0.35, 0.08, 0.22, M.sill, cx, y - 0.06, 0.08, g));
+    if (reg) makeBreakable('window', parts, g, { glass, rz: 1.3, wi });
+    return;
+  }
   const cx = x + w / 2, cy = y + h / 2;
   // interior glow + curtains behind glass
   const inside = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ color: 0x2e2a26, roughness: 1 }));
@@ -265,6 +363,19 @@ function addWindow(g, wd, brick, reg, wi) {
 function addDoor(g, dr) {
   const { x, w, h, color } = dr;
   const cx = x + w / 2;
+  if (dr.arch) {
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, map: woodTex });
+    const d = new THREE.Mesh(new THREE.ShapeGeometry(lancetShape(w, h)), mat); d.position.set(cx, 0, 0.03); g.add(d);
+    const o = lancetShape(w + 0.36, h + 0.22); o.holes.push(lancetShape(w, h));
+    const sur = new THREE.Mesh(new THREE.ShapeGeometry(o), M.sill); sur.position.set(cx, 0, 0.04); g.add(sur);
+    for (const dy of [0.7, 1.7]) box(w, 0.06, 0.03, M.iron, cx, dy, 0.05, g, false);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.015, 6, 12), M.iron); ring.position.set(cx + w * 0.3, 1.1, 0.06); g.add(ring);
+    return;
+  }
+  if (dr.wreath) {
+    const wr = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.07, 8, 18), M.leaf2); wr.position.set(cx, 1.55, 0.12); wr.castShadow = true; g.add(wr);
+    for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 5), new THREE.MeshStandardMaterial({ color: 0xd8203a })); const a = i * 1.05; b.position.set(cx + Math.cos(a) * 0.2, 1.55 + Math.sin(a) * 0.2, 0.19); g.add(b); }
+  }
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.05 });
   box(w, h - 0.35, 0.06, mat, cx, (h - 0.35) / 2, 0.02, g);
   box(w * 0.34, (h - 0.35) * 0.36, 0.02, mat, cx - w * 0.22, (h - 0.35) * 0.72, 0.06, g, false);
@@ -300,13 +411,23 @@ function buildLevelScene(L) {
   root.position.x = -L.W / 2;
   const G = levelGroup;
   breakables = []; clearTags(); sceneDirty = false;
-  buildHouse(G, L.house, { main: true });
+  const style = L.house.style || 'terrace';
+  if (style !== 'rocket') buildHouse(G, L.house, { main: true, snow: L.snow });
+  // world dressing that doesn't suit every job
+  const lawn = world.userData.lawn;
+  if (!lawn.userData.map) lawn.userData.map = lawn.material.map;
+  lawn.material.map = L.snow || style === 'rocket' || style === 'tower' ? null : lawn.userData.map;
+  lawn.material.color.set(L.snow ? 0xeef2f6 : style === 'rocket' ? 0xb8a57c : style === 'tower' ? 0x9a9c9e : 0xc4cfa8);
+  lawn.material.needsUpdate = true;
+  for (const m of world.userData.suburb) m.visible = style !== 'rocket' && style !== 'tower';
   // neighbours
-  const nb = [
+  const nbAll = [
     { x0: L.house.x0 - 12, x1: L.house.x0 - 3.5, eaves: 6, brick: L.house.brick === 'red' ? 'yellow' : 'red', windows: [{ x: L.house.x0 - 10.5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 10.5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x0 - 5.4, w: 1, h: 2.1, color: '#355c7d' }, chimney: L.house.x0 - 9 },
     { x0: L.house.x1 + 3.5, x1: L.house.x1 + 12, eaves: 6, brick: L.house.brick === 'stone' ? 'render' : 'stone', windows: [{ x: L.house.x1 + 5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x1 + 7.2, w: 1, h: 2.1, color: '#a23b2a' }, chimney: L.house.x1 + 6 },
   ];
-  for (const n of nb) { const hg = buildHouse(G, n); hg.position.z = -2.5; }
+  const nb = ['church', 'abbey', 'cathedral', 'rocket', 'tower'].includes(style) ? [] : style === 'leisure' || style === 'hall' ? [nbAll[0]] : nbAll;
+  for (const n of nb) { const hg = buildHouse(G, { ...n, style: 'terrace' }, { snow: L.snow }); hg.position.z = -2.5; }
+  buildTheme(G, L, style);
   // paved strip in front, stepped by column
   const x0 = -9 + L.W / 2, x1 = 9 + L.W / 2;
   let runStart = x0, runG = L.groundAt(x0 + 0.01);
@@ -356,6 +477,18 @@ function buildLevelScene(L) {
   // no-base zones (rose beds)
   for (const nb2 of L.noBase) {
     const [a, b, kind] = nb2;
+    if (kind === 'graves') {
+      const stoneM = new THREE.MeshStandardMaterial({ color: 0x8e8b84, roughness: 0.95 });
+      for (let x = a; x <= b; x += 1) for (const z of [1.0, 2.4]) {
+        const p = [];
+        const st = box(0.5, 0.75, 0.12, stoneM, x, 0.37, z, G); p.push(st);
+        const top = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.12, 14, 1, false, 0, Math.PI), stoneM); top.rotation.x = Math.PI / 2; top.rotation.z = Math.PI / 2; top.rotation.y = Math.PI / 2; top.position.set(x, 0.75, z); top.castShadow = true; G.add(top); p.push(top);
+        makeBreakable('pot', p, G);
+      }
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3), new THREE.MeshStandardMaterial({ map: labelTex('R.I.P.\nNO BASE PLATES'), roughness: 0.8 }));
+      sg.position.set(a + 0.9, 0.9, 3.1); G.add(sg);
+      continue;
+    }
     if (kind === 'roses') {
       const bedA = a - 0.45, bedB = b + 0.45;
       const soil = box(bedB - bedA, 0.08, STRIP_D - 0.4, new THREE.MeshStandardMaterial({ color: 0x3b2a1c, roughness: 1 }), (bedA + bedB) / 2, 0.04, STRIP_D / 2 + 0.1, G, false);
@@ -374,6 +507,12 @@ function buildLevelScene(L) {
   }
   // forbidden zones: porch canopy or door mats
   for (const f of L.forbidden) {
+    if (f.kind === 'buttress') {
+      const stoneM = texFromFacade('stone', 1.2, 6);
+      box(1.1, f.y1 + 1.2, 1.4, stoneM, (f.x0 + f.x1) / 2 + 0.3, (f.y1 + 1.2) / 2, 0.8, G);
+      const arch = box(2.6, 0.6, 0.9, stoneM, (f.x0 + f.x1) / 2 - 0.4, f.y1 + 1.6, 0.45, G); arch.rotation.z = 0.5;
+      for (const dx of [0, 0.5]) box(0.25, 0.8, 0.25, M.sill, (f.x0 + f.x1) / 2 + 0.3 + dx - 0.25, f.y1 + 1.6, 0.8, G);
+    }
     if (f.kind === 'porch') {
       const cw = f.x1 - f.x0 - 0.4;
       const cmx = (f.x0 + f.x1) / 2;
@@ -394,7 +533,7 @@ function buildLevelScene(L) {
     }
   }
   // garden clutter for the scaffold to flatten
-  addProps(G, L);
+  if (!['church', 'abbey', 'cathedral', 'tower', 'rocket', 'leisure'].includes(style)) addProps(G, L);
   // windsock for windy jobs
   windsock = null;
   if (L.wind > 0) {
@@ -416,6 +555,168 @@ function buildLevelScene(L) {
   pile.rotation.y = 0.3;
 }
 
+function signTex(text, bg = '#1f3b2c', fg = '#f1d38a') {
+  return canvasTex(1024, 160, (g, w, h) => {
+    g.fillStyle = bg; g.fillRect(0, 0, w, h); g.strokeStyle = fg; g.lineWidth = 8; g.strokeRect(10, 10, w - 20, h - 20);
+    g.fillStyle = fg; g.font = '700 84px "Big Shoulders Stencil Display", Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, h / 2 + 4);
+  });
+}
+function bunting(G, x0, x1, y, z, sag = 0.35) {
+  const cols = [0xd8203a, 0xf3d40b, 0x1f6fd1, 0xffffff, 0x2f9a4a];
+  const n = Math.max(4, Math.round((x1 - x0) / 0.35));
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1), x = x0 + (x1 - x0) * t, yy = y - sag * 4 * t * (1 - t);
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 3), new THREE.MeshStandardMaterial({ color: cols[i % cols.length], roughness: 0.8, side: THREE.DoubleSide }));
+    f.rotation.x = Math.PI; f.position.set(x, yy - 0.12, z); G.add(f);
+  }
+  const line = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, x1 - x0, 4), M.dark); line.rotation.z = Math.PI / 2; line.position.set((x0 + x1) / 2, y - sag * 0.7, z); G.add(line);
+}
+function buildTheme(G, L, style) {
+  const h = L.house, E = L.event || {};
+  const stoneM = texFromFacade('stone', 2, 2);
+  if (h.sign) {
+    const tex = signTex(h.sign, style === 'leisure' ? '#1a6fb8' : style === 'hall' ? '#f4efe2' : '#1f3b2c', style === 'leisure' ? '#ffffff' : style === 'hall' ? '#2c4a7a' : '#f1d38a');
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(7, h.x1 - h.x0 - 1), 0.62), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }));
+    sg.position.set((h.x0 + h.x1) / 2, style === 'leisure' ? h.eaves - 0.6 : style === 'hall' ? 3.2 : 2.75, 0.05); G.add(sg);
+  }
+  if (style === 'pub') {
+    for (const x of [h.x0 + 0.9, h.x1 - 0.9]) {
+      const bk = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.leaf); bk.rotation.x = Math.PI; bk.position.set(x, 2.55, 0.35); G.add(bk);
+      for (let i = 0; i < 5; i++) { const f = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), new THREE.MeshStandardMaterial({ color: [0xd8203a, 0xf06a8c, 0xfff1f0][i % 3] })); f.position.set(x + (i - 2) * 0.1, 2.45, 0.55); G.add(f); }
+    }
+    bunting(G, h.x0, h.x1, h.eaves - 0.3, 0.25, 0.4);
+    for (const x of [1.5, L.W - 1.5]) { box(1.4, 0.06, 0.5, M.bark, x, 0.72, 3.0, G); for (const dz of [-0.45, 0.45]) box(1.4, 0.05, 0.25, M.bark, x, 0.45, 3.0 + dz, G); }
+  }
+  if (style === 'mill') {
+    const ld = h.loadingDoors;
+    for (let f = 0; f < 3; f++) box(1.1, 1.8, 0.06, new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8, map: woodTex }), ld, 0.8 + f * 3 + 0.9, 0.04, G);
+    const beam = box(0.2, 0.2, 1.6, M.bark, ld, h.eaves - 0.2, 0.6, G);
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.5, 24), new THREE.MeshStandardMaterial({ color: 0x4a3526, roughness: 0.9, map: woodTex }));
+    wheel.rotation.x = Math.PI / 2; wheel.rotation.z = Math.PI / 2; wheel.position.set(h.x0 - 0.35, 2.4, -3); wheel.castShadow = true; G.add(wheel);
+  }
+  if (style === 'church') {
+    // west tower and spire off to the left
+    const tx0 = h.x0 - 4.2, tw = 3.6, th = 14;
+    const tm = texFromFacade('stone', tw, th);
+    box(tw, th, tw, tm, tx0 + tw / 2, th / 2, -tw / 2 - 1, G);
+    const sp = new THREE.Mesh(new THREE.ConeGeometry(tw * 0.62, 8, 4), new THREE.MeshStandardMaterial({ map: slateTex, roughness: 0.8 }));
+    sp.rotation.y = Math.PI / 4; sp.position.set(tx0 + tw / 2, th + 4, -tw / 2 - 1); sp.castShadow = true; G.add(sp);
+    const clock = new THREE.Mesh(new THREE.CircleGeometry(0.6, 24), new THREE.MeshStandardMaterial({ color: 0x1b2a3a, roughness: 0.4 })); clock.position.set(tx0 + tw / 2, th - 2, 0.82 - 1 + 0.2); G.add(clock);
+    box(0.05, 0.45, 0.02, M.brass, tx0 + tw / 2, th - 1.8, -0.0, G, false);
+    for (const [x, z, s2] of [[-6, 4.5, 1.1], [L.W + 3, 4, 1.3], [L.W + 6, -2, 1.5]]) { const t = new THREE.Mesh(new THREE.ConeGeometry(1.1 * s2, 3.4 * s2, 8), M.leaf2); t.position.set(x, 1.7 * s2, z); t.castShadow = true; G.add(t); }
+    for (const x of [-2.5, L.W + 1.2, L.W + 2.2]) for (const z of [4.3, 5.4]) { const st = box(0.5, 0.75, 0.12, new THREE.MeshStandardMaterial({ color: 0x8e8b84, roughness: 0.95 }), x, 0.37, z, G); }
+  }
+  if (style === 'abbey' || style === 'cathedral') {
+    // buttresses between the windows, pinnacles along the top
+    const wins = h.windows || [];
+    const clear = (x) => !wins.some(w => x > w.x - 0.4 && x < w.x + w.w + 0.4) && !(h.door && x > h.door.x - 0.4 && x < h.door.x + h.door.w + 0.4);
+    for (let x = h.x0 + 0.3; x <= h.x1 - 0.3; x += 0.5) if (clear(x) && (Math.round((x - h.x0) * 2) % 5 === 0)) {
+      box(0.45, h.eaves * 0.62, 0.35, stoneM, x, h.eaves * 0.31, 0.17, G);
+      const pin = new THREE.Mesh(new THREE.ConeGeometry(0.2, 1.1, 4), M.sill); pin.position.set(x, h.eaves + 0.55, 0.12); pin.castShadow = true; G.add(pin);
+    }
+    if (style === 'cathedral' && h.tower) {
+      box(h.x1 - h.x0 + 0.4, 0.5, 0.4, M.sill, (h.x0 + h.x1) / 2, 8.9, 0.15, G);
+      box(h.x1 - h.x0 + 0.4, 0.5, 0.4, M.sill, (h.x0 + h.x1) / 2, 12.6, 0.15, G);
+    }
+    if (style === 'cathedral') {
+      for (const x of [h.x0 - 1.6, h.x1 + 1.6]) {
+        const tm = texFromFacade('stone', 3, h.eaves + 6);
+        box(3, h.eaves + 6, 3, tm, x, (h.eaves + 6) / 2, -1.2, G);
+        for (const dx of [-1.2, 1.2]) { const pin = new THREE.Mesh(new THREE.ConeGeometry(0.28, 2, 4), M.sill); pin.position.set(x + dx, h.eaves + 7, -0.1); G.add(pin); }
+      }
+    }
+    for (const [x, z] of [[-4, 4.5], [L.W + 4, 4.8]]) { const t = new THREE.Mesh(new THREE.ConeGeometry(1.2, 3.6, 8), M.leaf2); t.position.set(x, 1.8, z); t.castShadow = true; G.add(t); }
+  }
+  if (E.type === 'chute') {
+    // the skip, and the Bishop's car right next to it
+    const [s0, s1] = E.skip;
+    const skipM = new THREE.MeshStandardMaterial({ color: 0xf0b90b, roughness: 0.6, metalness: 0.2 });
+    const sk = new THREE.Group(); G.add(sk); sk.position.set((s0 + s1) / 2, 0, 2.3);
+    const mk = (w, hh, d, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), skipM); m.position.set(x, y, z); m.castShadow = true; sk.add(m); };
+    const sw = s1 - s0 + 0.6;
+    mk(sw, 0.1, 1.5, 0, 0.1, 0); mk(sw, 1.0, 0.08, 0, 0.6, -0.75); mk(sw, 1.0, 0.08, 0, 0.6, 0.75); mk(0.08, 1.0, 1.5, -sw / 2, 0.6, 0); mk(0.08, 1.0, 1.5, sw / 2, 0.6, 0);
+    const [c0, c1] = E.car;
+    const car = new THREE.Group(); G.add(car); car.position.set((c0 + c1) / 2, 0, 3.6);
+    const paint = new THREE.MeshPhysicalMaterial({ color: 0x5a1f6e, roughness: 0.25, metalness: 0.6, clearcoat: 1 });
+    const body = new THREE.Mesh(new RoundedBoxGeometry(c1 - c0 + 0.8, 0.7, 1.7, 3, 0.2), paint); body.position.y = 0.6; body.castShadow = true; car.add(body);
+    const cab = new THREE.Mesh(new RoundedBoxGeometry(1.6, 0.55, 1.5, 3, 0.15), M.glass); cab.position.set(-0.1, 1.15, 0); car.add(cab);
+    for (const dx of [-0.95, 0.95]) for (const dz of [-0.8, 0.8]) { const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16), M.dark); wh.rotation.x = Math.PI / 2; wh.position.set(dx, 0.3, dz); car.add(wh); }
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.16), new THREE.MeshStandardMaterial({ map: labelTex('BI5HOP'), roughness: 0.6 })); plate.position.set(0, 0.55, 0.86); car.add(plate);
+    G.userData.car = car;
+  }
+  if (E.type === 'zip' || style === 'hall') {
+    // the pub across the road the zip wire runs to
+    const px = L.W + (E.dx || 16);
+    const pub = buildHouse(G, { style: 'pub', x0: px - 1.5, x1: px + 6, eaves: 5, brick: 'render', windows: [{ x: px - 0.6, y: 0.9, w: 1.4, h: 1.3 }, { x: px + 3.6, y: 0.9, w: 1.4, h: 1.3 }], door: { x: px + 1.6, w: 1, h: 2.1, color: '#1f3b2c' } });
+    pub.position.z = -2.5;
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(5, 0.55), new THREE.MeshStandardMaterial({ map: signTex('THE DOG & DUCK'), roughness: 0.6 })); sg.position.set(px + 2.2, 2.6, -2.4); G.add(sg);
+    bunting(G, 0.2, L.W - 0.2, 4.2, 3.2, 0.5);
+    for (const [x, col] of [[2, 0xd8203a], [6.5, 0x1f6fd1]]) {
+      const stall = new THREE.Group(); stall.position.set(x, 0, 5.2); G.add(stall);
+      box(1.8, 0.8, 0.8, M.bark, 0, 0.4, 0, stall);
+      const can = new THREE.Mesh(new THREE.BoxGeometry(2, 0.06, 1.2), new THREE.MeshStandardMaterial({ color: col, roughness: 0.7 })); can.position.y = 2.0; can.rotation.x = -0.15; stall.add(can);
+      for (const dx of [-0.9, 0.9]) box(0.05, 2, 0.05, M.white, dx, 1, -0.5, stall);
+    }
+  }
+  if (E.type === 'bmx') {
+    const [p0, p1] = E.pool;
+    const pool = new THREE.Group(); G.add(pool); pool.position.set((p0 + p1) / 2, 0, Z_MID);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry((p1 - p0) / 2, 0.22, 10, 32), new THREE.MeshStandardMaterial({ color: 0x3fa9f5, roughness: 0.4 }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.22; pool.add(ring);
+    const water = new THREE.Mesh(new THREE.CircleGeometry((p1 - p0) / 2 - 0.05, 32), new THREE.MeshStandardMaterial({ color: 0x6fd0ff, roughness: 0.1, transparent: true, opacity: 0.85 }));
+    water.rotation.x = -Math.PI / 2; water.position.y = 0.3; pool.add(water);
+    const duck = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffd12d })); duck.position.set(0.3, 0.38, 0.2); pool.add(duck);
+    const sgn = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), new THREE.MeshStandardMaterial({ map: labelTex('LANDING\nZONE'), roughness: 0.8 })); sgn.position.set(0, 1.1, -1.3); pool.add(sgn);
+    const post = box(0.05, 1, 0.05, M.bark, 0, 0.5, -1.32, pool);
+  }
+  if (E.type === 'fireworks') {
+    // bonfire in the close
+    const bx = -3.5;
+    for (let i = 0; i < 9; i++) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.2, 6), M.bark); l.position.set(bx + Math.cos(i * 0.7) * 0.4, 0.8, 4.5 + Math.sin(i * 0.7) * 0.4); l.rotation.set(Math.sin(i) * 0.5, 0, Math.cos(i * 1.3) * 0.5); G.add(l); }
+    const fire = new THREE.PointLight(0xff7a2a, 30, 14); fire.position.set(bx, 1.4, 4.5); G.add(fire);
+    G.userData.fire = { light: fire, x: bx, z: 4.5 };
+  }
+  if (L.snow) {
+    const snowM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+    const sm = new THREE.Group(); sm.position.set(-2.5, 0, 4.5); G.add(sm);
+    for (const [r, y] of [[0.45, 0.42], [0.32, 1.1], [0.22, 1.6]]) { const b = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), snowM); b.position.y = y; b.castShadow = true; sm.add(b); }
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.2, 8), new THREE.MeshStandardMaterial({ color: 0xff7a1a })); nose.rotation.x = Math.PI / 2; nose.position.set(0, 1.6, 0.25); sm.add(nose);
+    // fairy lights along the gutter
+    const lightsCol = [0xff4040, 0x40ff60, 0x4080ff, 0xffd040];
+    for (let x = h.x0; x <= h.x1; x += 0.35) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 5), new THREE.MeshStandardMaterial({ color: lightsCol[Math.round(x / 0.35) % 4], emissive: lightsCol[Math.round(x / 0.35) % 4], emissiveIntensity: 2 })); b.position.set(x, h.eaves - 0.25 - 0.08 * Math.abs(Math.sin(x * 2)), 0.45); G.add(b); }
+    box(18, 0.03, STRIP_D, snowM, L.W / 2, 0.012, STRIP_D / 2, G, false);
+  }
+  if (style === 'tower') {
+    for (const [x, hh, z, wdt] of [[-10, 46, -4, 8], [L.W + 9, 58, -6, 9], [-22, 34, -10, 10], [L.W + 22, 40, -12, 10]]) {
+      const tm = texFromFacade('glass', wdt, hh);
+      box(wdt, hh, wdt, tm, x, hh / 2, z - wdt / 2, G);
+    }
+    for (const x of [0, L.W]) { const planter = box(1.4, 0.5, 1.0, M.stoneWall, x, 0.25, 3.0, G); const t = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 1), M.leaf); t.position.set(x, 0.9, 3.0); G.add(t); }
+  }
+  if (style === 'rocket') buildRocket(G, L);
+}
+const rocketParts = { g: null, flame: null, y0: 0 };
+function buildRocket(G, L) {
+  const h = L.house, cx = (h.x0 + h.x1) / 2, r = (h.x1 - h.x0) / 2;
+  const g = new THREE.Group(); G.add(g); g.position.set(cx, 0, -r - 0.05);
+  const white = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.45, metalness: 0.1 });
+  const black = new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.5 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h.eaves - 4, 32), white); body.position.y = 1.2 + (h.eaves - 4) / 2; body.castShadow = true; g.add(body);
+  for (const y of [3, 7, 11]) { const b = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.01, r + 0.01, 0.6, 32), black); b.position.y = y; g.add(b); }
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(r, 4, 32), white); nose.position.y = h.eaves - 2.8 + 2; nose.castShadow = true; g.add(nose);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), new THREE.MeshStandardMaterial({ map: labelTex('WSA\nWESSEX', '#1f3b73', '#ffffff'), roughness: 0.6 })); flag.position.set(0, 6, r + 0.01); g.add(flag);
+  const hatch = new THREE.Mesh(new THREE.CircleGeometry(0.4, 20), black); hatch.rotation.y = Math.PI / 2; hatch.position.set(r + 0.01, L.zones[0].y + 1.0, 0); g.add(hatch);
+  for (let i = 0; i < 4; i++) { const fin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.2, 1.1), black); const a = i * Math.PI / 2 + Math.PI / 4; fin.position.set(Math.cos(a) * (r + 0.4), 2.2, Math.sin(a) * (r + 0.4)); fin.rotation.y = -a; g.add(fin); }
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.6, r * 0.85, 1.2, 24), black); nozzle.position.y = 0.6; g.add(nozzle);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(r * 0.9, 6, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xffb24a, transparent: true, opacity: 0.85, depthWrite: false }));
+  flame.rotation.x = Math.PI; flame.position.y = -3; flame.visible = false; g.add(flame);
+  rocketParts.g = g; rocketParts.flame = flame; rocketParts.y0 = 0;
+  // launch pad and flame trench
+  box(8, 0.3, 8, M.stoneWall, cx, 0.15, -r, G);
+  box(3.2, 0.32, 3.2, M.dark, cx, 0.16, -r, G);
+  for (const [x, z] of [[-6, 3], [L.W + 5, 4], [L.W + 8, -3]]) { const cac = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 2, 8), M.leaf2); cac.position.set(x, 1, z); G.add(cac); }
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.6), new THREE.MeshStandardMaterial({ map: labelTex('DANGER\nLAUNCH AREA', '#f3d40b', '#161b21'), roughness: 0.7 })); sign.position.set(L.W + 2, 1.2, 4.5); G.add(sign);
+}
 function addProps(G, L) {
   const clear = (x) => x > 0.3 && x < L.W - 0.3 && !L.forbidden.some(f => x > f.x0 - 0.6 && x < f.x1 + 0.6) && !L.noBase.some(([a, b]) => x > a - 0.8 && x < b + 0.8) && L.groundAt(x) === 0;
   const spots = [];

@@ -66,6 +66,17 @@ scene.add(sky);
   scene.environmentIntensity = 0.5;
 }
 scene.fog = new THREE.Fog(0xbfd3e3, 70, 330);
+// a starry sky dome for night jobs, drawn over the daytime sky
+const nightSky = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, map: ((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })((() => {
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 1024; const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 1024); gr.addColorStop(0, '#05070f'); gr.addColorStop(0.45, '#0e1630'); gr.addColorStop(0.52, '#2a2440'); gr.addColorStop(1, '#0a0c14');
+  g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
+  for (let i = 0; i < 1400; i++) { const y = Math.random() * 480; g.fillStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.7})`; g.fillRect(Math.random() * 2048, y, Math.random() < 0.1 ? 2 : 1, Math.random() < 0.1 ? 2 : 1); }
+  g.fillStyle = '#fdf6e0'; g.beginPath(); g.arc(1500, 240, 26, 0, 7); g.fill();
+  return c;
+})()) }));
+nightSky.visible = false;
+scene.add(nightSky);
 
 const sun = new THREE.DirectionalLight(0xffeccc, 3.3);
 sun.position.copy(SUN_DIR).multiplyScalar(60);
@@ -121,10 +132,24 @@ function facadeTextures(style) {
     red: { h: [8, 18], s: [42, 58], l: [30, 44], mortar: '#b9ae9f' },
     yellow: { h: [34, 44], s: [34, 48], l: [55, 68], mortar: '#cfc6b3' },
     stone: { h: [36, 46], s: [10, 20], l: [60, 72], mortar: '#a79f90' },
-    render: null,
+    render: null, glass: null,
   }[style];
   let draw, bumpDraw;
-  if (!pal) {
+  if (style === 'glass') {
+    // curtain wall: 2 m x 2 m of tinted panels in aluminium mullions, with a few lights on
+    draw = (g) => {
+      g.fillStyle = '#8d979f'; g.fillRect(0, 0, W, H);
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+        const x = c * W / 4 + 10, y = r * H / 2 + 12, w = W / 4 - 20, h = H / 2 - 24;
+        const gr = g.createLinearGradient(x, y, x + w, y + h);
+        const lit = rnd() < 0.18;
+        gr.addColorStop(0, lit ? '#f4e2a8' : '#3f6a86'); gr.addColorStop(1, lit ? '#d9c07a' : '#1e3448');
+        g.fillStyle = gr; g.fillRect(x, y, w, h);
+        g.fillStyle = 'rgba(255,255,255,0.10)'; g.beginPath(); g.moveTo(x, y + h * 0.7); g.lineTo(x + w * 0.6, y); g.lineTo(x + w * 0.8, y); g.lineTo(x, y + h); g.fill();
+      }
+    };
+    bumpDraw = (g) => { g.fillStyle = '#909090'; g.fillRect(0, 0, W, H); g.fillStyle = '#e0e0e0'; for (let c = 0; c <= 4; c++) g.fillRect(c * W / 4 - 6, 0, 12, H); for (let r = 0; r <= 2; r++) g.fillRect(0, r * H / 2 - 6, W, 12); };
+  } else if (!pal) {
     draw = (g) => { noiseFill(g, W, H, '#ece4d4', 0.05, 3); for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(120,110,90,${rnd() * 0.04})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, 30 + rnd() * 120, 0, 7); g.fill(); } g.strokeStyle = 'rgba(0,0,0,.06)'; g.lineWidth = 2; for (let y = 0; y < H; y += H / 4) { g.beginPath(); g.moveTo(0, y + 1); g.lineTo(W, y + 1); g.stroke(); } };
     bumpDraw = (g) => { noiseFill(g, W, H, '#808080', 0.25, 2); g.fillStyle = '#6a6a6a'; for (let y = 0; y < H; y += H / 4) g.fillRect(0, y, W, 3); };
   } else {
@@ -274,6 +299,7 @@ const texFromFacade = (style, w, h) => {
   const m2 = map.clone(), b2 = bump.clone();
   m2.needsUpdate = true; b2.needsUpdate = true;
   m2.repeat.set(w / 2, h / 2); b2.repeat.set(w / 2, h / 2);
+  if (style === 'glass') return new THREE.MeshStandardMaterial({ map: m2, bumpMap: b2, bumpScale: 1.2, roughness: 0.22, metalness: 0.35, envMapIntensity: 1.4 });
   return new THREE.MeshStandardMaterial({ map: m2, bumpMap: b2, bumpScale: style === 'render' ? 0.6 : 2.2, roughness: 0.92 });
 };
 
@@ -322,6 +348,7 @@ function makeTree(x, z, s = 1, kind = 0) {
   const lawn = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: gt, roughness: 1, color: 0xc4cfa8, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }));
   lawn.receiveShadow = true;
   world.add(lawn);
+  world.userData.lawn = lawn;
   // pavement + kerb + road
   const pv = new THREE.Mesh(new THREE.PlaneGeometry(600, 2.4), new THREE.MeshStandardMaterial({ map: pavementTex, roughness: 0.95 }));
   pv.rotation.x = -Math.PI / 2; pv.position.set(0, 0.045, 9.6); pv.receiveShadow = true; world.add(pv);
@@ -331,12 +358,13 @@ function makeTree(x, z, s = 1, kind = 0) {
   for (let x = -150; x < 150; x += 6) box(3, 0.01, 0.14, new THREE.MeshStandardMaterial({ color: 0xe8e6de, roughness: 0.8 }), x, 0.03, 15.4, world, false);
   // front garden walls with gap
   const wallMat = texFromFacade('red', 2, 0.6);
-  box(9, 0.7, 0.3, wallMat, -9.5, 0.35, 8.1);
-  box(9, 0.7, 0.3, wallMat, 9.5, 0.35, 8.1);
-  box(9.3, 0.08, 0.36, M.sill, -9.5, 0.74, 8.1); box(9.3, 0.08, 0.36, M.sill, 9.5, 0.74, 8.1);
+  const sub = world.userData.suburb = [];
+  sub.push(box(9, 0.7, 0.3, wallMat, -9.5, 0.35, 8.1));
+  sub.push(box(9, 0.7, 0.3, wallMat, 9.5, 0.35, 8.1));
+  sub.push(box(9.3, 0.08, 0.36, M.sill, -9.5, 0.74, 8.1)); sub.push(box(9.3, 0.08, 0.36, M.sill, 9.5, 0.74, 8.1));
   // hedges
   const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x3c6b2a, roughness: 1, bumpMap: grassTex, bumpScale: 4 });
-  for (const x of [-16, 16]) box(8, 1.6, 1.2, hedgeMat, x, 0.8, 7.2);
+  for (const x of [-16, 16]) sub.push(box(8, 1.6, 1.2, hedgeMat, x, 0.8, 7.2));
   // trees
   makeTree(-17, -6, 1.5); makeTree(-21, 3, 1.2, 1); makeTree(18, -5, 1.6); makeTree(22, 4, 1.1, 1);
   makeTree(-6, -16, 1.8); makeTree(7, -18, 1.7); makeTree(-30, -10, 1.8); makeTree(30, -14, 1.9);

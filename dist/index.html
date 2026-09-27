@@ -298,7 +298,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
     <button class="big" id="playBtn">Clock on</button>
     <div class="fine">Best in landscape. Headphones on for the crashes.</div>
     <div class="fine">Big Terry wants it cheap. Dave just wants to get home.</div>
-    <div class="fine">Build 2026-09-26 23:27 UTC</div>
+    <div class="fine">Build 2026-09-27 12:07 UTC</div>
   </div>
 </div>
 
@@ -306,8 +306,8 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
   <div class="sheet panel">
     <h2>Job sheet</h2>
     <div class="tally" id="chavTally"></div>
-    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-09-26 23:27 UTC</div>
-    <div class="sub">Twelve jobs. Terry quotes low, the loads get sillier, and the local youth get bolder. Whatever you don't spend is profit.</div>
+    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-09-27 12:07 UTC</div>
+    <div class="sub">Twenty-four jobs. Houses first, then the specials: a mill, Terry's party, a church, an abbey, a zip wire, a BMX, fireworks, Father Christmas, a bell tower, two skyscrapers and a rocket. Whatever you don't spend is profit.</div>
     <div class="grid" id="cards"></div>
   </div>
 </div>
@@ -327,6 +327,533 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// ============================================================================
+//  Special jobs: what happens on the top platform once Dave has done his
+//  deliveries. Each level may have one `event` ({ type, ...params }). These
+//  are mixed into Trial (see eventMixin at the bottom of engine.js).
+//
+//  Nothing at the top level of this file may touch engine exports: in the
+//  bundle this file comes first, so only function declarations live here.
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+//  Helpers shared with the design checks
+// ---------------------------------------------------------------------------
+// The unbroken run of real (non-trap) boards at level gy that contains x.
+function boardRun(sim, gy, x) {
+  const real = (u) => { const b = sim.boardUnder(u, gy); return !!b && b.type.id !== 'trap'; };
+  let k = Math.floor(x);
+  if (!real(k + 0.5)) { if (x === k && real(k - 0.5)) k -= 1; else return null; }
+  let x0 = k, x1 = k + 1;
+  while (real(x0 - 0.5)) x0 -= 1;
+  while (real(x1 + 0.5)) x1 += 1;
+  return { x0, x1 };
+}
+function pieceNode(sim, pieces, type) {
+  const p = pieces.find(q => q.type === type);
+  if (!p) return null;
+  return sim.nodeAt(p.a[0], p.a[1]);
+}
+// Where the gin wheel's load can be swung in and landed: nearest point on the
+// platform within reach of the wheel.
+function hoistLanding(sim, level, wx, w = 0.8) {
+  const zy = level.zones[0].y;
+  let best = null, bd = 1.8;
+  for (const b of sim.boardsAtLevel(zy)) {
+    if (b.type.id === 'trap') continue;
+    const x = Math.max(b.x0 + 0.5, Math.min(b.x1 - 0.5, wx));
+    const d = Math.abs(x - wx);
+    if (d < bd - 1e-6) { bd = d; best = x; }
+  }
+  return best;
+}
+// Where the BMX lands: ride right from the start along real boards, launch off the end.
+function bmxFlight(sim, level, E) {
+  const zy = level.zones[0].y;
+  const run = boardRun(sim, zy, E.start + 0.3);
+  if (!run) return null;
+  const h = zy + 0.15 - level.groundAt(run.x1 + 2);
+  const vy = E.hop, v = E.v;
+  const t = (vy + Math.sqrt(vy * vy + 2 * GRAV * h)) / GRAV;
+  return { launch: run.x1, land: run.x1 + v * t };
+}
+// Sleigh stopping distance on snowy boards.
+function sleighNeeds(E) { return E.v * E.v / (2 * E.mu * GRAV) + 0.9; }
+
+// Checklist lines + whether the job can go ahead at all.
+function eventChecks(level, sim, pieces) {
+  const E = level.event, out = [];
+  let ok = true;
+  if (!E) return { checks: out, ok };
+  const z = level.zones[0];
+  if (E.type === 'hoist') {
+    const n = pieceNode(sim, pieces, 'wheel');
+    const land = n ? hoistLanding(sim, level, n.gx) : null;
+    if (!n) { ok = false; out.push([false, 'Fit a gin wheel where the loads can hang clear to the ground']); }
+    else if (land === null) { ok = false; out.push([false, 'Nothing to land the loads on: board the platform within 1.5 m of the gin wheel']); }
+    else out.push([true, `Gin wheel ready: loads land at ${land.toFixed(1)} m`]);
+  } else if (E.type === 'zip') {
+    const n = pieceNode(sim, pieces, 'zip');
+    if (!n) { ok = false; out.push([false, 'Fix the zip wire anchor to a joint at platform level']); }
+    else out.push([true, `Zip wire anchored at ${n.gy} m. It pulls hard towards the pub`]);
+  } else if (E.type === 'chute') {
+    const n = pieceNode(sim, pieces, 'chute');
+    if (!n) out.push([false, `No rubble chute: the roofers will chuck it off the edge (${'£' + E.carCost} a bag to the Bishop's car)`]);
+    else if (n.gx >= E.skip[0] && n.gx <= E.skip[1]) out.push([true, 'Rubble chute runs into the skip']);
+    else out.push([false, `The chute misses the skip (skip is at ${E.skip[0]}–${E.skip[1]} m)`]);
+  } else if (E.type === 'bmx') {
+    const f = bmxFlight(sim, level, E);
+    if (!f) { ok = false; out.push([false, `Tyler needs boards to ride out onto at ${E.start} m, ${z.y} m up`]); }
+    else if (f.land >= E.pool[0] && f.land <= E.pool[1]) out.push([true, `Tyler launches at ${f.launch} m and lands in the pool at ${f.land.toFixed(1)} m`]);
+    else out.push([false, `Tyler launches at ${f.launch} m and lands at ${f.land.toFixed(1)} m: ${f.land < E.pool[0] ? 'short of' : 'past'} the pool (${E.pool[0]}–${E.pool[1]} m)`]);
+  } else if (E.type === 'sleigh') {
+    const run = boardRun(sim, z.y, z.x0 + 0.5);
+    const need = sleighNeeds(E);
+    const len = run ? run.x1 - run.x0 : 0;
+    out.push([len >= need, run ? `Runway ${len} m of real boards; the sleigh needs about ${need.toFixed(1)} m to stop` : 'No runway: the sleigh lands on the left end of the platform']);
+  } else if (E.type === 'party') {
+    out.push(['info', `${E.guests} guests will dance on the platform for ${E.dur} s. Floppy scaffolds bounce`]);
+  } else if (E.type === 'fireworks') {
+    out.push(['info', `Terry's fireworks go off from the platform. Stray rockets go for the windows`]);
+  } else if (E.type === 'launch') {
+    out.push(['info', 'The astronaut climbs to the capsule, then the rocket blast hits the scaffold']);
+  }
+  return { checks: out, ok };
+}
+
+// ---------------------------------------------------------------------------
+//  People who climb up for an event (party guests, zip riders, Terry, ...)
+// ---------------------------------------------------------------------------
+function newVisitor(tr, o) {
+  return Object.assign({ who: 'visitor', style: 'guest0', name: 'A guest', id: tr.visitors.length, x: tr.startX + 2, y: 0, state: 'wait', delay: 0, visible: false,
+    mode: 'ground', face: -1, t: 0, onBoard: -1, onLadder: -1, onMember: -1, load: null, u: null, mass: 80, gy: tr.level.zones[0].y, targetX: tr.level.zones[0].x0 + 0.5,
+    homeX: tr.startX + 3, massK: 1, fx: 0, walkV: 1.6, climbV: 1.1 }, o);
+}
+function visitorStep(tr, v, dt) {
+  const sim = tr.sim;
+  if (v.state === 'gone' || v.state === 'falling' || v.state === 'flat') return;
+  v.t += dt;
+  const end = () => sim.nodes[v.route[v.route.length - 1].node];
+  switch (v.state) {
+    case 'wait': if (v.t > v.delay) { v.visible = true; v.state = 'plan'; v.t = 0; v.y = tr.level.groundAt(v.x); } return;
+    case 'plan': {
+      const nodes = [];
+      for (const bd of sim.boardsAtLevel(v.gy)) if (bd.type.id !== 'trap') nodes.push(bd.a, bd.b);
+      const route = nodes.length ? sim.findRoute(v.x, nodes, v.targetX, { traps: 'avoid' }) : null;
+      if (!route) { v.state = 'stuck'; v.t = 0; return; }
+      v.route = route; v.routeI = 0; v.segT = 0; v.returning = false; v.state = 'go';
+      return;
+    }
+    case 'go': if (tr._walkGround(v, v.route[0].x, v.walkV, dt)) { v.state = 'route'; v.routeI = 1; v.segT = 0; } return;
+    case 'route':
+      if (tr._routeStep(v, dt, v.mass, v.climbV, v.walkV)) {
+        if (!v.returning) { v.state = 'toX'; v.u = end().gx; }
+        else { v.state = 'home'; tr._setLoad(v, null); v.onLadder = -1; v.onBoard = -1; }
+      }
+      return;
+    case 'toX': case 'back': {
+      const tx = v.state === 'toX' ? v.targetX : end().gx;
+      const dir = Math.sign(tx - v.u);
+      v.face = dir || v.face; v.mode = 'walk';
+      v.u += dir * Math.min(Math.abs(tx - v.u), v.walkV * dt);
+      if (!tr._placeOnBoard(v, v.gy, v.mass)) { tr._fall(v, 0, 0); return; }
+      if (Math.abs(tx - v.u) < 1e-3) {
+        if (v.state === 'toX') { v.state = 'act'; v.t = 0; }
+        else { v.u = null; v.returning = true; v.state = 'route'; v.routeI = v.route.length - 2; v.segT = 0; }
+      }
+      return;
+    }
+    case 'act': tr._placeOnBoard(v, v.gy, v.mass * v.massK, v.fx); return;
+    case 'home': case 'stuck': if (tr._walkGround(v, v.homeX, 1.7, dt)) { if (v.state === 'home') { v.state = 'gone'; v.visible = false; } } return;
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  The events
+// ---------------------------------------------------------------------------
+const PARTY_STYLES = ['guest0', 'guest1', 'guest2', 'guest3', 'guest4', 'guest5'];
+
+function hoistStart(E, ev) {
+  const n = pieceNode(this.sim, this.pieces, 'wheel');
+  ev.node = n.id; ev.wx = n.gx; ev.i = 0; ev.stage = 'walk';
+  const b = this.builder; b.visible = true; b.carrying = null;
+}
+function hoistUpdate(E, ev, dt) {
+  const b = this.builder, sim = this.sim, L = this.level, zy = L.zones[0].y;
+  const node = sim.nodes[ev.node];
+  ev.st = (ev.st || 0) + dt;
+  if (ev.stage === 'walk') {
+    b.state = 'walk';
+    if (this._walkGround(b, ev.wx + 0.7, 1.7, dt)) {
+      const key = E.loads[ev.i];
+      const g = L.groundAt(ev.wx);
+      const it = { def: ITEMS[key], key, x: ev.wx, y: g, vx: 0, vy: 0, state: 'hoist', loads: [], rot: 0, vr: 0, targetX: ev.wx, zoneY: zy, hanging: true };
+      this.items.push(it);
+      ev.item = it; ev.ld = { kind: 'node', node: ev.node, mass: 0 }; sim.loads.push(ev.ld);
+      ev.stage = 'lift'; ev.st = 0; b.state = 'haul'; b.face = -1;
+      this.events.push({ type: 'hoist', what: 'lift', key });
+    }
+  } else if (ev.stage === 'lift') {
+    const it = ev.item, g = L.groundAt(ev.wx);
+    const dur = 1.5 + (zy - g) * 0.75;
+    const k = Math.min(1, ev.st / dur);
+    it.x = ev.wx; it.y = g + (zy + 0.45 - g) * k;
+    // rope over the wheel: the load on one side, Dave pulling on the other
+    ev.ld.mass = 2 * it.def.mass * Math.min(1, ev.st / 0.35) * (1 + 0.2 * Math.exp(-ev.st * 2));
+    if (!node.alive || !node.arms.length) { this._dropItem(it, it.x, it.y, 0); it.zoneY = null; this._removeLoad(ev.ld); ev.stage = 'done'; return; }
+    if (k >= 1) { ev.land = hoistLanding(sim, L, ev.wx); ev.stage = ev.land === null ? 'noland' : 'swing'; ev.st = 0; }
+  } else if (ev.stage === 'swing') {
+    const it = ev.item, k = Math.min(1, ev.st / 1.3);
+    const s = k * k * (3 - 2 * k);
+    it.x = ev.wx + (ev.land - ev.wx) * s;
+    it.y = zy + 0.45 + Math.sin(k * Math.PI) * 0.15;
+    if (k >= 1) {
+      this._removeLoad(ev.ld); ev.ld = null;
+      it.hanging = false; this._dropItem(it, ev.land, zy + 0.4, -0.3); it.zoneY = zy;
+      ev.stage = 'rest'; ev.st = 0; b.state = 'walk';
+    }
+  } else if (ev.stage === 'noland') {
+    this.fail(`Nowhere to land the ${ev.item.def.name.toLowerCase()}`, null, true);
+  } else if (ev.stage === 'rest') {
+    if (ev.st > 1.8) { ev.i++; ev.stage = ev.i < E.loads.length ? 'walk' : 'home'; }
+  } else if (ev.stage === 'home') {
+    if (this._walkGround(b, this.startX + 0.8, 1.7, dt)) { b.state = 'watch'; ev.stage = 'done'; }
+  } else if (ev.stage === 'done') this._eventEnd();
+}
+
+function partyStart(E, ev) {
+  const z = this.level.zones[0], n = E.guests;
+  for (let i = 0; i < n; i++) {
+    const tx = n > 1 ? z.x0 + 0.35 + i * (z.x1 - z.x0 - 0.7) / (n - 1) : (z.x0 + z.x1) / 2;
+    this.visitors.push(newVisitor(this, { style: PARTY_STYLES[i % PARTY_STYLES.length], name: 'A party guest', x: this.startX + 1.5 + (i % 3) * 0.5, homeX: this.startX + 4 + i * 0.3, delay: i * 1.1, targetX: tx, mass: 78, gy: z.y }));
+  }
+  ev.partyT = -1; ev.beat = 0;
+  this.builder.state = 'watch';
+  this.events.push({ type: 'party', what: 'arrive' });
+}
+function partyUpdate(E, ev, dt) {
+  const V = this.visitors;
+  const dancing = V.filter(v => v.state === 'act');
+  if (ev.partyT < 0 && dancing.length && V.every(v => v.state === 'act' || v.state === 'stuck' || v.state === 'gone' || v.state === 'falling' || v.state === 'flat')) { ev.partyT = 0; this.events.push({ type: 'party', what: 'music' }); }
+  if (ev.partyT >= 0 && ev.partyT <= E.dur) {
+    ev.partyT += dt;
+    const f = E.beat * (1 + 0.25 * Math.min(1, ev.partyT / E.dur));   // the DJ speeds up
+    ev.beat += 2 * Math.PI * f * dt;
+    const ramp = Math.min(1, ev.partyT / 3);
+    for (const v of dancing) {
+      v.hop = Math.max(0, Math.sin(ev.beat));
+      v.massK = 1 + 0.6 * ramp * Math.sin(ev.beat);
+      v.fx = E.sway * ramp * Math.sin(ev.beat / 2);   // everyone sways side to side together
+      v.dance = true;
+    }
+    if (ev.partyT > E.dur) {
+      this.events.push({ type: 'party', what: 'end' });
+      for (const v of V) { v.massK = 1; v.fx = 0; v.hop = 0; v.dance = false; if (v.state === 'act') { v.state = 'back'; } }
+    }
+  }
+  // nobody made it up? call it off
+  if (ev.partyT < 0 && V.every(v => v.state === 'stuck' || v.state === 'gone' || v.state === 'flat')) ev.partyT = E.dur + 1;
+  if ((ev.partyT > E.dur && V.every(v => v.state === 'gone' || v.state === 'flat' || v.state === 'stuck')) || ev.t > 240) this._eventEnd();
+}
+
+function zipStart(E, ev) {
+  const n = pieceNode(this.sim, this.pieces, 'zip');
+  const L = this.level;
+  ev.node = n.id;
+  ev.to = { x: L.W + E.dx, y: E.y };
+  ev.ld = { kind: 'node', node: n.id, mass: 0, fx: 0 }; this.sim.loads.push(ev.ld);
+  const stand = this.sim.boardUnder(n.gx - 0.3, n.gy) ? n.gx - 0.35 : n.gx + 0.35;
+  E.riders.forEach((r, i) => this.visitors.push(newVisitor(this, { style: r.style, name: r.name, x: this.startX + 1.5, homeX: this.startX + 3, delay: i === 0 ? 0 : 1e9, targetX: stand, mass: r.mass, gy: n.gy })));
+  ev.next = 1; ev.pre = 0; ev.riding = [];
+  this.builder.state = 'watch';
+}
+function zipUpdate(E, ev, dt) {
+  const sim = this.sim, n = sim.nodes[ev.node];
+  const V = this.visitors;
+  ev.pre = Math.min(1, ev.pre + dt / 2);
+  // clipping on, then off down the wire
+  for (const v of V) {
+    if (v.state === 'act') {
+      if (v.t > 0.9) {
+        v.state = 'zip'; v.s = 0; v.zv = 1.2; this._setLoad(v, null); v.onBoard = -1; v.mode = 'zip';
+        this.events.push({ type: 'zip', what: 'go', name: v.name });
+        if (ev.next < V.length) { V[ev.next].delay = V[ev.next].t + 0.5; ev.next++; }
+      }
+    } else if (v.state === 'zip') {
+      const len = Math.hypot(ev.to.x - n.x, ev.to.y - n.y);
+      v.zv = Math.min(13, v.zv + 3.2 * dt);
+      v.s += v.zv * dt / len;
+      const s = Math.min(1, v.s);
+      v.x = n.x + (ev.to.x - n.x) * s; v.y = n.y + (ev.to.y - n.y) * s - 4 * E.sag * s * (1 - s) - 1.9;
+      if (v.s >= 1) { v.state = 'gone'; v.visible = false; this.events.push({ type: 'zip', what: 'arrive', name: v.name }); }
+    }
+  }
+  // cable tension at the anchor: pretension plus each rider's pull (worst mid-span)
+  const theta = Math.atan2(n.y - ev.to.y, ev.to.x - n.x);
+  let Fh = E.pre * ev.pre, Wv = 0;
+  for (const v of V) if (v.state === 'zip') { const s = Math.min(1, v.s); Fh += v.mass * GRAV * E.k * 4 * s * (1 - s); Wv += v.mass * (1 - s); }
+  ev.Fh = Fh;
+  ev.ld.fx = Fh; ev.ld.mass = Fh * Math.tan(theta) / GRAV + Wv;
+  if (V.every(v => v.state === 'gone' || v.state === 'stuck' || v.state === 'flat')) {
+    ev.pre = 0; this._removeLoad(ev.ld); this._eventEnd();
+  }
+}
+
+function chuteStart(E, ev) {
+  const n = pieceNode(this.sim, this.pieces, 'chute');
+  ev.node = n ? n.id : -1; ev.i = 0; ev.stage = 'throw'; ev.st = 0;
+  if (n) { ev.cl = { kind: 'node', node: n.id, mass: 55 }; this.sim.loads.push(ev.cl); }
+  this.builder.state = 'watch';
+}
+function chuteUpdate(E, ev, dt) {
+  const sim = this.sim, L = this.level, zy = L.zones[0].y;
+  ev.st += dt;
+  if (ev.stage === 'throw') {
+    if (ev.st < 0.9) return;
+    const bx = E.bags[ev.i];
+    const it = { def: ITEMS.rubble, key: 'rubble', x: bx, y: zy + 2.6, vx: 0, vy: -0.5, state: 'falling', loads: [], rot: 0, vr: 1.5, targetX: bx, zoneY: zy };
+    this.items.push(it); ev.item = it; ev.stage = 'land'; ev.st = 0;
+    this.events.push({ type: 'chute', what: 'throw', x: bx });
+  } else if (ev.stage === 'land') {
+    if (ev.item.state === 'placed' && ev.st > 1.3) {
+      const it = ev.item;
+      for (const ld of it.loads) this._removeLoad(ld); it.loads = []; it.state = 'hoist';
+      const n = ev.node >= 0 ? sim.nodes[ev.node] : null;
+      if (n) ev.dest = n.gx;
+      else { const run = boardRun(sim, zy, it.x); ev.dest = run ? (it.x - run.x0 < run.x1 - it.x ? run.x0 - 0.3 : run.x1 + 0.3) : it.x; }
+      ev.from = it.x; ev.stage = 'slide'; ev.st = 0;
+    } else if (ev.item.state === 'ground' || ev.st > 12) ev.stage = 'next';
+  } else if (ev.stage === 'slide') {
+    const it = ev.item, k = Math.min(1, ev.st / 0.9);
+    it.x = ev.from + (ev.dest - ev.from) * k;
+    it.y = sim.boardUnder(it.x, zy) ? zy + 0.1 : zy + 0.1 - (k - 0.9) * 2;
+    if (k >= 1) {
+      it.state = 'falling'; it.zoneY = null; it.vy = -1; it.chuted = true; it.x = ev.dest;
+      if (ev.node >= 0) { ev.kick = { kind: 'node', node: ev.node, mass: it.def.mass * 1.6 }; sim.loads.push(ev.kick); ev.kickT = 0.4; }
+      ev.stage = 'fall'; ev.st = 0;
+      this.events.push({ type: 'chute', what: 'drop', x: ev.dest, chute: ev.node >= 0 });
+    }
+  } else if (ev.stage === 'fall') {
+    if (ev.kick && (ev.kickT -= dt) <= 0) { this._removeLoad(ev.kick); ev.kick = null; }
+    if (ev.item.state === 'ground') {
+      const x = ev.item.x;
+      if (x >= E.skip[0] && x <= E.skip[1]) this.events.push({ type: 'chute', what: 'skip', x });
+      else if (x >= E.car[0] - 0.5 && x <= E.car[1] + 0.5) { this.charges.push({ what: "Bishop's car", cost: E.carCost }); this.events.push({ type: 'chute', what: 'car', x }); }
+      else { this.charges.push({ what: 'Rubble clear-up', cost: 60 }); this.events.push({ type: 'chute', what: 'mess', x }); }
+      ev.item.state = 'gone';
+      ev.stage = 'next';
+    }
+  } else if (ev.stage === 'next') {
+    ev.i++; ev.st = 0;
+    ev.stage = ev.i < E.bags.length ? 'throw' : 'done';
+  } else if (ev.stage === 'done') {
+    if (ev.cl) this._removeLoad(ev.cl);
+    this._eventEnd();
+  }
+}
+
+function bmxStart(E, ev) {
+  const L = this.level, zy = L.zones[0].y;
+  const r = { who: 'tyler', style: 'tyler', name: 'Tyler', visible: true, x: E.start, y: zy, u: E.start + 0.3, state: 'appear', mode: 'walk', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1, load: null, gy: zy, bike: true };
+  this.visitors.push(r); ev.r = r; ev.v = E.v;
+  this.builder.state = 'watch';
+  this.events.push({ type: 'bmx', what: 'appear', x: E.start, y: zy });
+}
+function bmxUpdate(E, ev, dt) {
+  const r = ev.r, sim = this.sim, L = this.level;
+  if (r.state === 'falling' || r.state === 'flat') return;
+  r.t += dt;
+  if (r.state === 'appear') {
+    this._placeOnBoard(r, r.gy, 85);
+    if (r.t > 1.4) { r.state = 'ride'; r.t = 0; this.events.push({ type: 'bmx', what: 'go' }); }
+  } else if (r.state === 'ride') {
+    r.u += ev.v * dt;
+    const bd = sim.boardUnder(r.u, r.gy);
+    if (!bd || bd.broken) {
+      // off the end: fly
+      this._setLoad(r, null); r.onBoard = -1;
+      r.state = 'fly'; r.vx = ev.v; r.vy = E.hop; r.x = r.u; r.y = r.gy + 0.12; r.t = 0; r.spin = 0;
+      this.events.push({ type: 'bmx', what: 'launch', x: r.x });
+      return;
+    }
+    const bump = 1.25 + 0.2 * Math.sin(r.u * 6);
+    this._placeOnBoard(r, r.gy, 85 * bump, 60);
+  } else if (r.state === 'fly') {
+    r.vy -= GRAV * dt; r.x += r.vx * dt; r.y += r.vy * dt; r.spin += dt * 6;
+    // landing on another platform?
+    if (r.vy < 0) for (const gy of [...new Set(sim.boards.map(b => b.gy))]) {
+      if (r.y - r.vy * dt >= gy + 0.1 && r.y < gy + 0.1) {
+        const bd = sim.boardUnder(r.x, gy);
+        if (bd && !bd.broken) { r.gy = gy; r.u = r.x; r.state = 'ride'; r.t = 0; this.events.push({ type: 'bmx', what: 'land', x: r.x }); return; }
+      }
+    }
+    const g = L.groundAt(r.x);
+    if (r.y <= g) {
+      r.y = g;
+      if (r.x >= E.pool[0] && r.x <= E.pool[1]) { r.state = 'splash'; r.t = 0; r.visible = true; this.events.push({ type: 'bmx', what: 'splash', x: r.x }); }
+      else {
+        r.state = 'flat'; this.events.push({ type: 'bmx', what: 'crash', x: r.x });
+        const d = r.x < E.pool[0] ? E.pool[0] - r.x : r.x - E.pool[1];
+        this.fail(`Tyler missed the paddling pool by ${d.toFixed(1)} m. He's fine. His mum isn't.`, null, true);
+      }
+    }
+  } else if (r.state === 'splash') {
+    if (r.t > 2.5) { r.state = 'gone'; r.visible = false; this._eventEnd(); }
+  }
+}
+
+function sleighStart(E, ev) {
+  const L = this.level, z = L.zones[0];
+  const run = boardRun(this.sim, z.y, z.x0 + 0.5);
+  ev.touch = run ? run.x0 + 0.9 : z.x0 + 0.9;
+  ev.s = { who: 'sleigh', x: ev.touch - 14, y: z.y + 6, state: 'fly', v: E.v, u: null, gy: z.y, loads: [] };
+  ev.st = 0;
+  this.builder.state = 'watch';
+  this.events.push({ type: 'sleigh', what: 'bells' });
+}
+function sleighLoads(tr, ev, E, mass, fx) {
+  for (const ld of ev.s.loads) tr._removeLoad(ld);
+  ev.s.loads = [];
+  if (mass <= 0) return true;
+  for (const dx of [-0.7, 0.7]) {
+    const bd = tr.sim.boardUnder(ev.s.u + dx, ev.s.gy);
+    if (!bd || bd.broken) return false;
+    const ld = { kind: 'board', board: bd.id, t: Math.max(0, Math.min(1, ev.s.u + dx - bd.x0)), mass: mass / 2, fx: fx / 2 };
+    tr.sim.loads.push(ld); ev.s.loads.push(ld);
+  }
+  return true;
+}
+function sleighUpdate(E, ev, dt) {
+  const s = ev.s, L = this.level;
+  ev.st += dt;
+  if (s.state === 'fly') {
+    const k = Math.min(1, ev.st / 3.2);
+    s.x = ev.touch - 14 * (1 - k); s.y = s.gy + 0.05 + 6 * (1 - k) * (1 - k);
+    if (k >= 1) {
+      s.u = ev.touch; s.state = 'slide'; ev.st = 0;
+      if (!sleighLoads(this, ev, E, E.mass * 1.6, 0)) { s.state = 'crash'; s.vy = 0; this.fail('The sleigh missed the platform. Christmas is cancelled.', null, true); return; }
+      this.events.push({ type: 'sleigh', what: 'touchdown', x: s.u });
+    }
+  } else if (s.state === 'slide') {
+    const impact = 1 + 0.6 * Math.exp(-ev.st * 4);
+    s.v = Math.max(0, s.v - E.mu * GRAV * dt);
+    s.u += s.v * dt; s.x = s.u;
+    const fx = s.v > 0 ? E.mu * E.mass * GRAV : 0;
+    if (!sleighLoads(this, ev, E, E.mass * impact, fx)) {
+      s.state = 'crash'; s.vy = 0; sleighLoads(this, ev, E, 0, 0);
+      this.events.push({ type: 'sleigh', what: 'crash', x: s.x });
+      this.fail('The sleigh went off the end of the platform. Christmas is cancelled.', null, true);
+      return;
+    }
+    if (s.v <= 0) { s.state = 'parked'; ev.st = 0; this.events.push({ type: 'sleigh', what: 'stop', x: s.x }); }
+  } else if (s.state === 'parked') {
+    sleighLoads(this, ev, E, E.mass - (ev.st > 1 && ev.st < 6 ? 110 : 0), 0);   // Santa hops out for a bit
+    if (ev.st > 1 && !ev.santaOut) { ev.santaOut = true; this.events.push({ type: 'sleigh', what: 'santa', x: s.x }); }
+    if (ev.st > 7) { s.state = 'takeoff'; ev.st = 0; sleighLoads(this, ev, E, 0, 0); this.events.push({ type: 'sleigh', what: 'takeoff' }); }
+  } else if (s.state === 'takeoff') {
+    s.x += (2 + ev.st * 8) * dt; s.y += (ev.st * 4) * dt;
+    if (ev.st > 4) { s.state = 'gone'; this._eventEnd(); }
+  } else if (s.state === 'crash') {
+    s.vy -= GRAV * dt; s.y += s.vy * dt; s.x += 2 * dt;
+    if (s.y < L.groundAt(s.x)) s.y = L.groundAt(s.x);
+  }
+}
+
+function fireworksStart(E, ev) {
+  const z = this.level.zones[0];
+  this.visitors.push(newVisitor(this, { style: 'terry', name: 'Terry', x: this.startX + 1.5, homeX: this.startX + 2.5, targetX: E.launchX + 0.8, mass: 120, gy: z.y }));
+  ev.fired = 0; ev.st = 0; ev.lit = false;
+  this.builder.state = 'watch';
+}
+function fireworksUpdate(E, ev, dt) {
+  const T = this.visitors[0], z = this.level.zones[0];
+  if (!ev.lit && T.state === 'act' && T.t > 1.2) { ev.lit = true; ev.st = 0; this.events.push({ type: 'fireworks', what: 'lit' }); }
+  if (ev.lit && ev.fired < E.rockets) {
+    ev.st += dt;
+    if (ev.st > 0.7) {
+      ev.st = 0;
+      const rogue = E.rogue[ev.fired] ?? -1;
+      this.events.push({ type: 'rocket', i: ev.fired, x: E.launchX, y: z.y + 0.7, rogue });
+      ev.fired++;
+      T.massK = 1.05;
+    }
+  } else if (ev.lit && ev.fired >= E.rockets) {
+    ev.st += dt;
+    if (ev.st > 3 && T.state === 'act') { T.state = 'back'; this.events.push({ type: 'fireworks', what: 'done' }); }
+  }
+  if (T.state === 'stuck' && !ev.lit) { ev.lit = true; ev.fired = E.rockets; }
+  if ((ev.lit && ev.fired >= E.rockets && (T.state === 'gone' || T.state === 'stuck' || T.state === 'flat')) || ev.t > 200) this._eventEnd();
+}
+
+function launchStart(E, ev) {
+  const z = this.level.zones[0];
+  this.visitors.push(newVisitor(this, { style: 'astro', name: 'The astronaut', x: this.startX + 1.5, homeX: this.startX + 2.5, targetX: E.capsuleX, mass: 110, gy: z.y, climbV: 0.8 }));
+  ev.stage = 'climb'; ev.st = 0; ev.rocketY = 0;
+  this.builder.state = 'watch';
+}
+function launchUpdate(E, ev, dt) {
+  const A = this.visitors[0];
+  ev.st += dt;
+  if (ev.stage === 'climb') {
+    if (A.state === 'act' && A.t > 0.8) { A.state = 'gone'; A.visible = false; this._setLoad(A, null); ev.stage = 'count'; ev.st = 0; ev.n = 10; this.events.push({ type: 'launch', what: 'aboard' }); }
+    if (A.state === 'stuck') { ev.stage = 'count'; ev.st = 0; ev.n = 10; this.events.push({ type: 'launch', what: 'scrub' }); }
+  } else if (ev.stage === 'count') {
+    if (ev.st > 1) { ev.st = 0; ev.n--; this.events.push({ type: 'launch', what: 'count', n: ev.n }); if (ev.n <= 0) { ev.stage = 'lift'; this.events.push({ type: 'launch', what: 'ignition' }); } }
+  } else if (ev.stage === 'lift') {
+    const t = ev.st;
+    const env = t < 1 ? t : t < 4 ? 1 : Math.max(0, 1 - (t - 4) / 2.5);
+    this.sim.blast = E.blast * env * (1 + 0.25 * Math.sin(t * 23));
+    ev.rocketY = t < 1.2 ? 0 : 0.5 * 5 * (t - 1.2) * (t - 1.2);
+    if (t > 7) { this.sim.blast = 0; ev.stage = 'done'; this.events.push({ type: 'launch', what: 'away' }); }
+  } else if (ev.stage === 'done') this._eventEnd();
+}
+
+const EVENTS = {
+  hoist: [hoistStart, hoistUpdate],
+  party: [partyStart, partyUpdate],
+  zip: [zipStart, zipUpdate],
+  chute: [chuteStart, chuteUpdate],
+  bmx: [bmxStart, bmxUpdate],
+  sleigh: [sleighStart, sleighUpdate],
+  fireworks: [fireworksStart, fireworksUpdate],
+  launch: [launchStart, launchUpdate],
+};
+
+function eventMixin(T) {
+  Object.assign(T.prototype, {
+    _afterDeliveries() {
+      const L = this.level;
+      if (L.event && EVENTS[L.event.type] && !this.evDone && !this.skipDeliveries) {
+        this.phase = 'event';
+        this.ev = { t: 0, type: L.event.type };
+        const b = this.builder;
+        b.visible = true; b.x = this.startX + 0.8; b.y = L.groundAt(b.x); b.face = -1; b.mode = 'ground'; b.state = 'watch';
+        EVENTS[L.event.type][0].call(this, L.event, this.ev);
+        return;
+      }
+      this._startNight();
+    },
+    _eventUpdate(dt) {
+      if (this.phase !== 'event') return;
+      this.ev.t += dt;
+      for (const v of this.visitors) visitorStep(this, v, dt);
+      EVENTS[this.ev.type][1].call(this, this.level.event, this.ev, dt);
+    },
+    _eventEnd() {
+      if (this.phase !== 'event') return;
+      this.evDone = true;
+      this.sim.blast = 0;
+      this._startNight();
+    },
+    _removeLoad(ld) {
+      if (!ld) return;
+      const i = this.sim.loads.indexOf(ld);
+      if (i >= 0) this.sim.loads.splice(i, 1);
+    },
+    _visitorsTick(dt) { if (this.phase !== 'event') for (const v of this.visitors) visitorStep(this, v, dt); },
+  });
+}
 
 // ============================================================================
 //  SCAFFOLD engine: 2D XPBD structural sim + construction/loading trial runner.
@@ -362,6 +889,7 @@ const WINDOW_BREAK_KG = 100;  // dumping this much in front of a window puts a b
 // Windows a delivery will smash unless they're boarded up: heavy drops landing right in front of them.
 function windowsAtRisk(level) {
   const out = new Set();
+  if (level.event && level.event.type === 'fireworks') for (const w of level.event.rogue) if (w >= 0) out.add(w);
   const ws = level.house.windows || [];
   for (const d of level.deliveries) {
     const it = ITEMS[d.item], z = level.zones[d.zone];
@@ -394,6 +922,16 @@ const ITEMS = {
   dumpy:   { name: 'Tonne bag of sand',    mass: 1000, w: 1.0 },
   grand:   { name: 'Grand piano',          mass: 520,  w: 1.8 },
   statue:  { name: 'Bronze elephant',      mass: 1600, w: 1.8 },
+  keg:     { name: 'Barrels of beer',      mass: 120,  w: 0.8 },
+  speakers:{ name: 'Sound system',         mass: 90,   w: 0.9 },
+  sacks:   { name: 'Sacks of grain',       mass: 160,  w: 0.8 },
+  millstone:{ name: 'Millstone',           mass: 380,  w: 1.1 },
+  rubble:  { name: 'Bag of old slates',    mass: 70,   w: 0.6 },
+  fireworks:{ name: 'Crate of fireworks',  mass: 70,   w: 0.8 },
+  bell:    { name: 'Church bell',          mass: 900,  w: 1.1 },
+  glass:   { name: 'Glass panels',         mass: 180,  w: 1.2 },
+  kit:     { name: "Astronaut's packed lunch", mass: 30, w: 0.5 },
+  presents:{ name: 'Sack of presents',     mass: 60,   w: 0.7 },
 };
 
 // ---------------------------------------------------------------------------
@@ -411,12 +949,17 @@ function prepLevel(def) {
     if (x < 0 || x > L.W) return L.groundCol(x < 0 ? 0 : L.W);
     return L.groundCol(Math.round(x));
   };
+  L.evType = L.event ? L.event.type : null;
+  L.toolWheel = L.evType === 'hoist'; L.toolZip = L.evType === 'zip'; L.toolChute = L.evType === 'chute';
+  L.toolHatch = !!L.monster && L.monster !== 'hide';
   L.canBase = (gx) => !L.noBase.some(([a, b]) => gx >= a && gx <= b);
   L.inForbidden = (x, y) => L.forbidden.some(f => x > f.x0 + 1e-6 && x < f.x1 - 1e-6 && y > f.y0 + 1e-6 && y < f.y1 - 1e-6);
   L.onForbiddenEdgeOrIn = (x, y) => L.forbidden.some(f => x >= f.x0 - 1e-6 && x <= f.x1 + 1e-6 && y >= f.y0 - 1e-6 && y <= f.y1 + 1e-6 && !(Math.abs(y - f.y0) < 1e-6 && f.y0 <= L.groundCol(x)));
   L.canTie = (gx, gy) => {
     const h = L.house;
     if (gx < h.x0 || gx > h.x1 || gy < L.groundCol(gx) + 1 || gy > h.eaves) return false;
+    if (h.tieRows && !h.tieRows.includes(gy)) return false;
+    if (h.style === 'rocket') return false;
     for (const w of h.windows || []) if (gx >= w.x - 0.01 && gx <= w.x + w.w + 0.01 && gy >= w.y - 0.01 && gy <= w.y + w.h + 0.01) return false;
     if (h.door && gx >= h.door.x - 0.01 && gx <= h.door.x + h.door.w + 0.01 && gy <= h.door.h + 0.01) return false;
     return true;
@@ -434,6 +977,9 @@ function pieceCost(p) {
   if (p.type === 'lock') return LOCK.cost;
   if (p.type === 'protect') return BOARDUP.cost;
   if (p.type === 'hatch') return HATCH.cost;
+  if (p.type === 'wheel') return 45;
+  if (p.type === 'zip') return 60;
+  if (p.type === 'chute') return 40;
   return 0;
 }
 function baseCostFor(p) { return 0; }
@@ -694,7 +1240,7 @@ class Sim {
 
   windAt(t) {
     const L = this.level;
-    const breeze = 1.5 * Math.sin(t * 2.9) + 1.5 * Math.sin(t * 0.47 + 1.1);
+    const breeze = 1.5 * Math.sin(t * 2.9) + 1.5 * Math.sin(t * 0.47 + 1.1) + (this.blast || 0);
     if (!L.wind) return breeze;
     const w = L.wind * (0.7 + 0.3 * Math.sin(t * 0.61) * Math.sin(t * 0.23 + 0.4));
     const g = L.gust * Math.pow(Math.max(0, Math.sin(t * 0.33 + 0.5)), 6);
@@ -901,7 +1447,7 @@ class Sim {
     const dist = new Map(), prev = new Map();
     const pq = [];
     for (const l of this.ladders) {
-      if (!this.ladderOk(l)) continue;
+      if (l.pulled || !this.ladderOk(l)) continue;
       if (l.bottom >= 0) { add(l.bottom, l.top, l.len * 1.5, 'climb', l.id); continue; }
       if (l.locked && !allowLocked) continue;
       const d0 = Math.abs(l.x - startX) * 0.3 + l.len * 1.5;
@@ -1064,8 +1610,31 @@ function validatePlacement(level, pieces, p) {
     if (lockSet.has(p.a.join(','))) return 'Already locked';
     return null;
   }
+  if (p.type === 'wheel' || p.type === 'zip' || p.type === 'chute') {
+    const need = { wheel: 'toolWheel', zip: 'toolZip', chute: 'toolChute' }[p.type];
+    if (!L[need]) return 'Not on this job';
+    const [x, y] = p.a;
+    if (!nodeSet.has(x + ',' + y)) return 'Fix it to a scaffold joint';
+    if (pieces.some(q => q.type === p.type)) return 'You only need one';
+    const zy = L.zones[0].y;
+    const boardAt = (bx, by) => boardSet.has(bx + ',' + by);
+    if (p.type === 'wheel') {
+      if (y < zy) return `The gin wheel goes at platform height (${zy} m) or above`;
+      for (let yy = L.groundCol(x); yy < y; yy++) if (nodeSet.has(x + ',' + yy)) return 'The rope has to hang clear to the ground: there\'s scaffold in the way below';
+      for (const k of boardSet) { const [bx, by] = k.split(',').map(Number); if (by < y && bx < x && bx + 1 > x) return 'The rope has to hang clear to the ground: boards in the way'; }
+      return null;
+    }
+    if (p.type === 'zip') {
+      if (y < zy) return `Anchor it at platform height (${zy} m) or above`;
+      if (!boardAt(x - 1, y) && !boardAt(x, y)) return 'Riders need boards to stand on next to the anchor';
+      return null;
+    }
+    if (y !== zy) return `The chute hangs off the platform edge (${zy} m up)`;
+    if (!boardAt(x - 1, y) && !boardAt(x, y)) return 'The chute needs boards next to it';
+    return null;
+  }
   if (p.type === 'hatch') {
-    if (!L.monster) return 'Nothing down the drains on this job';
+    if (!L.toolHatch) return L.monster === 'hide' ? 'Consecrated ground: no digging' : 'Nothing down the drains on this job';
     const x = p.a[0];
     if (x !== Math.round(x) || x < 0 || x > L.W) return 'Put it in the pavement in front of the house';
     if (!L.canBase(x)) return "Can't dig there";
@@ -1141,7 +1710,8 @@ function checkRequirements(level, pieces) {
     const plan = zones[d.zone].reachable ? planDelivery(sim, level, d) : null;
     if (plan && plan.overloads.length) heavy.push({ delivery: i, item: d.item, carry: plan.carry, x: d.x, y: level.zones[d.zone].y, trap: plan.overloads.some(o => o.trap) });
   });
-  return { zones, heavy, ok: zones.every(z => z.boarded && z.reachable) };
+  const ev = eventChecks(level, sim, pieces);
+  return { zones, heavy, event: ev.checks, ok: zones.every(z => z.boarded && z.reachable) && ev.ok };
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,19 +1740,22 @@ class Trial {
     this.deliv = 0;
     this.maxDispSeen = 0;
     this.chavs = [];
+    this.visitors = [];
+    this.charges = [];
     this.tags = [];
     this.chavT = 0;
     this.rng = mulberry32(777 + (level.id || 0));
   }
 
-  fail(reason, where) {
+  fail(reason, where, soft = false) {
     if (this.result) return;
     this.phase = 'failing';
     this.failT = 0;
+    if (soft) { this.result = { ok: false, reason, where, soft: true, trapped: this.trappedCount || 0, sued: false, daveDown: false }; return; }
     this.sim.damping = 0.3;
     // anyone on the scaffold, or standing right under it, gets caught up in the wreckage
     const W = this.level.W;
-    for (const p of [this.builder, ...this.chavs]) {
+    for (const p of [this.builder, ...this.chavs, ...this.visitors]) {
       if (!p.visible || p.state === 'gone' || p.state === 'falling' || p.state === 'flat') continue;
       const near = p.x > -0.3 && p.x < W + 0.3 && p.y < 2.5 + this.level.groundAt(p.x);
       if (this._onStructure(p) || near) {
@@ -1230,11 +1803,13 @@ class Trial {
       this.chavT += dt;
       this._chavsUpdate(dt);
       if (this.chavs.every(c => c.state === 'gone' || c.state === 'flat') || this.chavT > 60) this._nightOver();
+    } else if (this.phase === 'event') {
+      this._eventUpdate(dt);
     } else if (this.phase === 'monster') {
       this._monsterUpdate(dt);
     } else if (this.phase === 'hold') {
       this.pieceT += dt;
-      if (this.pieceT > 2.5 && !this.result) { this.phase = 'done'; this.result = { ok: true, tags: this.tags.length, trapped: this.trappedCount || 0, eaten: !!this.daveEaten, monsterTrapped: !!this.monsterTrapped }; }
+      if (this.pieceT > 2.5 && !this.result) { this.phase = 'done'; this.result = { ok: true, tags: this.tags.length, trapped: this.trappedCount || 0, eaten: !!this.daveEaten, monsterTrapped: !!this.monsterTrapped, hid: !!this.daveHid }; }
     } else if (this.phase === 'failing') {
       this.failT += dt;
       if (this.failT > 4.5) this.phase = 'done';
@@ -1257,7 +1832,7 @@ class Trial {
 
   // ---- people shared helpers ----
   _people(dt) {
-    for (const p of [this.builder, ...this.chavs]) {
+    for (const p of [this.builder, ...this.chavs, ...this.visitors]) {
       if (!p.visible) continue;
       if (p.state === 'falling') {
         p.vy -= GRAV * dt; p.y += p.vy * dt; p.x += p.vx * dt;
@@ -1280,7 +1855,8 @@ class Trial {
         if (!trap) p.tangled = true;
         this._fall(p, 0, 0);
         if (p === this.builder) this.fail(trap ? 'Dave fell through a trap board! The only way up went over it.' : 'Dave fell off!');
-        else if (!trap) this.fail('A chav fell off');
+        else if (p.who === 'chav') { if (!trap) this.fail('A chav fell off'); }
+        else this.fail(`${p.name || 'Someone'} fell ${trap ? 'through a trap board' : 'off'}!`);
         continue;
       }
       if (this.phase === 'failing') this._cling(p);
@@ -1375,11 +1951,7 @@ class Trial {
     const L = this.level;
     const b = this.builder;
     if (this.skipDeliveries) this.deliv = L.deliveries.length;
-    if (this.deliv >= L.deliveries.length) {
-      if (L.chavs > 0) { this.phase = 'chavs'; this.chavT = 0; this._spawnChavs(); b.state = 'watch'; b.visible = true; b.x = this.startX + 0.8; b.face = -1; }
-      else this._nightOver();
-      return;
-    }
+    if (this.deliv >= L.deliveries.length) { this._afterDeliveries(); return; }
     this.phase = 'deliver';
     const d = L.deliveries[this.deliv];
     const z = L.zones[d.zone];
@@ -1443,6 +2015,11 @@ class Trial {
     }
   }
 
+  _startNight() {
+    const L = this.level, b = this.builder;
+    if (L.chavs > 0) { this.phase = 'chavs'; this.chavT = 0; this._spawnChavs(); b.state = 'watch'; b.visible = true; b.x = this.startX + 0.8; b.y = L.groundAt(b.x); b.face = -1; this._setLoad(b, null); b.onBoard = b.onLadder = b.onMember = -1; }
+    else this._nightOver();
+  }
   // ---- the thing in the drains ----
   _nightOver() {
     const b = this.builder;
@@ -1452,14 +2029,72 @@ class Trial {
       b.onBoard = b.onLadder = b.onMember = -1; this._setLoad(b, null);
       this.monster = { x: MONSTER_X, y: this.level.groundAt(MONSTER_X) - 1.6, state: 'emerge', t: 0, face: 1 };
       this.events.push({ type: 'monster', what: 'emerge' });
+      if (this.level.monster === 'hide') this._planEscape();
       return;
     }
     this.phase = 'hold'; this.pieceT = 0; b.state = 'waving';
+  }
+  // Consecrated ground, no trap door: Dave legs it up the scaffold and pulls the ladder up after him.
+  _planEscape() {
+    const sim = this.sim, b = this.builder;
+    const levels = [...new Set(sim.boards.filter(bd => !bd.broken && bd.type.id !== 'trap').map(bd => bd.gy))].sort((p, q) => q - p);
+    for (const gy of levels) {
+      const nodes = [];
+      for (const bd of sim.boardsAtLevel(gy)) if (bd.type.id !== 'trap') nodes.push(bd.a, bd.b);
+      const route = sim.findRoute(b.x, nodes, null, { traps: 'avoid' });
+      if (route && route.length > 1) { b.route = route; b.flee = 'go'; b.routeI = 0; b.segT = 0; b.returning = false; b.zy = gy; return; }
+    }
+  }
+  _fleeStep(dt) {
+    const b = this.builder, sim = this.sim;
+    if (!b.flee || b.state === 'falling' || b.state === 'flat' || b.state === 'eaten') return;
+    if (b.flee === 'go') {
+      b.state = 'walk';
+      if (this._walkGround(b, b.route[0].x, 2.6, dt)) { b.flee = 'climb'; b.routeI = 1; b.segT = 0; }
+    } else if (b.flee === 'climb') {
+      b.state = 'route';
+      if (this._routeStep(b, dt, BUILDER_MASS, 1.5, 2.2)) {
+        b.flee = 'safe'; b.u = sim.nodes[b.route[b.route.length - 1].node].gx;
+        const first = b.route[1] && b.route[1].via;
+        if (first && first.kind === 'climb') { sim.ladders[first.ref].pulled = true; this.events.push({ type: 'monster', what: 'pull', x: sim.ladders[first.ref].x }); }
+        this.daveHid = true;
+      }
+    } else if (b.flee === 'safe') {
+      if (!this._placeOnBoard(b, b.zy, BUILDER_MASS)) return;
+      b.state = this.monster && this.monster.state === 'shake' ? 'scared' : 'waving';
+    }
   }
   _monsterUpdate(dt) {
     const m = this.monster, b = this.builder, L = this.level;
     m.t += dt;
     const ground = (x) => L.groundAt(x);
+    if (L.monster === 'hide') this._fleeStep(dt);
+    if (L.monster === 'hide' && b.flee && b.flee !== 'go' && (m.state === 'walk' || m.state === 'shake' || m.state === 'sulk' || m.state === 'sink')) {
+      const foot = b.route[0].x;
+      if (m.state === 'walk') {
+        const target = foot - 0.8;
+        m.x = Math.min(target, m.x + 1.35 * dt); m.y = ground(m.x);
+        if (m.x >= target - 1e-6) {
+          // too late, he's up: give the scaffold a good shake instead
+          let best = null, bd = 99;
+          for (const n of this.sim.nodes) { if (n.hidden || n.fixed || !n.arms.length || n.base) continue; const d = Math.hypot(n.gx - foot, n.gy - ground(foot) - 1.6); if (d < bd) { bd = d; best = n; } }
+          m.state = 'shake'; m.t = 0; m.node = best ? best.id : -1;
+          if (best) { m.ld = { kind: 'node', node: best.id, mass: 0, fx: 0 }; this.sim.loads.push(m.ld); }
+          this.events.push({ type: 'monster', what: 'shake', x: m.x });
+        }
+      } else if (m.state === 'shake') {
+        const ramp = Math.min(1, m.t / 1.5);
+        if (m.ld) m.ld.fx = (L.shake || 1500) * ramp * Math.sin(2 * Math.PI * 1.4 * m.t);
+        if (m.t > 9) { if (m.ld) { const i = this.sim.loads.indexOf(m.ld); if (i >= 0) this.sim.loads.splice(i, 1); m.ld = null; } m.state = 'sulk'; m.t = 0; this.events.push({ type: 'monster', what: 'sulk', x: m.x }); }
+      } else if (m.state === 'sulk') {
+        m.x = Math.max(MONSTER_X, m.x - 1.2 * dt); m.y = ground(m.x); m.face = -1;
+        if (m.x <= MONSTER_X + 1e-6) { m.state = 'sink'; m.t = 0; }
+      } else if (m.state === 'sink') {
+        m.y = ground(m.x) - m.t * 1.2;
+        if (m.t > 1.6) { m.state = 'away'; this.phase = 'hold'; this.pieceT = 0; if (b.flee === 'safe') b.state = 'waving'; }
+      }
+      return;
+    }
     if (m.state === 'emerge') {
       m.y = Math.min(ground(m.x), ground(m.x) - 1.6 + m.t * 1.1);
       if (m.t > 2.2) { m.state = 'walk'; m.t = 0; this.events.push({ type: 'monster', what: 'roar' }); }
@@ -1476,7 +2111,7 @@ class Trial {
     } else if (m.state === 'gone') {
       if (m.t > 4.2) { this.phase = 'hold'; this.pieceT = 0; b.state = 'waving'; }
     } else if (m.state === 'eat') {
-      if (m.t > 0.6 && b.visible && !this.daveEaten) { this.daveEaten = true; b.visible = false; b.state = 'eaten'; }
+      if (m.t > 0.6 && b.visible && !this.daveEaten) { this.daveEaten = true; b.visible = false; b.state = 'eaten'; b.flee = null; this._setLoad(b, null); b.onBoard = b.onLadder = b.onMember = -1; }
       if (m.t > 2.2) {
         m.state = 'leave'; m.t = 0;
         // the agency sends someone round
@@ -1699,7 +2334,7 @@ class Trial {
           const g = this.level.groundAt(it.x);
           if (it.y <= g) {
             it.y = g; it.vy = 0; it.state = 'ground'; it.vr = 0;
-            if (this.phase !== 'failing' && this.phase !== 'done') this.fail(`The ${it.def.name.toLowerCase()} fell off the scaffold`);
+            if (!it.chuted && this.phase !== 'failing' && this.phase !== 'done') this.fail(`The ${it.def.name.toLowerCase()} fell off the scaffold`);
           }
         }
       } else if (it.state === 'placed') {
@@ -1720,6 +2355,8 @@ class Trial {
     }
   }
 }
+
+eventMixin(Trial);
 
 // ============================================================================
 //  Levels. Grid units are metres. x runs along the facade, y is height.
@@ -1859,6 +2496,146 @@ const LEVELS = [
     wind: 4, gust: 6, deck: true, heavy: true,
     budget: 1520, chavs: 4, startX: 13,
   },
+  // ------------------------------------------------------------------ part two
+  {
+    id: 13, name: 'Hoist Away', client: 'Old Corn Mill (luxury flats coming soon)',
+    brief: "The developers want a sack of grain and the original millstone back up at the loft doors, 6 m up. Too heavy to carry: fit a gin wheel and haul them up on a rope.",
+    tip: "The rope has to hang clear to the ground, so the wheel goes out on a cantilever past the end of the scaffold. Rope over a wheel pulls down twice the load. Brace the arm.",
+    W: 10, H: 8,
+    house: { style: 'mill', x0: 0.5, x1: 8.5, floors: 3, eaves: 9, brick: 'stone', door: { x: 1.2, w: 1.3, h: 2.4, color: '#3c2a1e' }, windows: [win(3.4, 0, 0.9), win(6.6, 0, 0.9), win(1.4, 1, 0.9), win(6.6, 1, 0.9), win(1.4, 2, 0.9)], roof: 'gable', loadingDoors: 4.2 },
+    zones: [{ x0: 3, x1: 7, y: 6, label: 'Loft doors' }],
+    deliveries: [],
+    event: { type: 'hoist', loads: ['sacks', 'millstone'] },
+    heavy: true,
+    budget: 1660, chavs: 1, startX: 12,
+  },
+  {
+    id: 14, name: "Terry's 50th", client: 'The Scaffolders Arms',
+    brief: "Terry's having his 50th on the scaffold outside his local. Ten of the lads will be dancing on the platform at 3 m. Get the beer and the speakers up first.",
+    tip: 'Everyone jumps in time to the music and sways side to side together. A floppy scaffold rocks harder and harder until something gives. Braces and ties keep it stiff.',
+    W: 10, H: 5,
+    house: { style: 'pub', x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'render', door: { x: 4.5, w: 1.1, h: 2.2, color: '#1f3b2c' }, windows: [win(1.3, 0, 1.6), win(7, 0, 1.6), win(1.5, 1, 1.2), win(4.5, 1, 1.1), win(7.2, 1, 1.2)], roof: 'gable', chimney: 8, sign: 'THE SCAFFOLDERS ARMS' },
+    zones: [{ x0: 2, x1: 8, y: 3, label: 'Dance floor' }],
+    deliveries: [{ item: 'keg', zone: 0, x: 3 }, { item: 'speakers', zone: 0, x: 7 }],
+    event: { type: 'party', guests: 10, dur: 20, beat: 2.0, sway: 170 },
+    budget: 860, chavs: 1, startX: 12,
+  },
+  {
+    id: 15, name: 'Sanctuary', client: 'St Wilfrid\'s Church',
+    brief: "The lead's come off the nave roof. Platform at 4 m. There's something in the drains again, but you can't dig a trap door in a churchyard.",
+    tip: 'When it comes, Dave climbs up and pulls his ladder up behind him. It can\'t climb, but it will shake the scaffold for all it\'s worth. Brace the bottom lift.',
+    W: 11, H: 6,
+    house: { style: 'church', x0: 0.5, x1: 10.5, floors: 1, eaves: 5, brick: 'stone', door: { x: 8.6, w: 1.2, h: 2.6, color: '#4a2d18', arch: true }, windows: [{ x: 1.6, y: 1.2, w: 0.9, h: 2.8, kind: 'lancet' }, { x: 4.0, y: 1.2, w: 0.9, h: 2.8, kind: 'lancet' }, { x: 6.4, y: 1.2, w: 0.9, h: 2.8, kind: 'lancet' }], roof: 'gable' },
+    noBase: [[5, 5, 'graves']],
+    zones: [{ x0: 3, x1: 8, y: 4, label: 'Lead flashing' }],
+    deliveries: [{ item: 'hod', zone: 0, x: 4 }, { item: 'bags', zone: 0, x: 7 }],
+    monster: 'hide', shake: 5000, night: true,
+    budget: 960, chavs: 0, startX: 13,
+  },
+  {
+    id: 16, name: 'Down the Chute', client: 'Brother Anselm, Kirkby Abbey',
+    brief: "The roofers are stripping the old slates from the abbey roof and throwing them down onto your platform at 6 m. Get the rubble down a chute into the skip. The Bishop has parked next to it.",
+    tip: "The skip is at 10½–12 m, so the chute has to hang off a board end over it. No chute and the roofers throw it off the end, onto the Bishop's car.",
+    W: 12, H: 7,
+    house: { style: 'abbey', x0: 0.5, x1: 10, floors: 2, eaves: 8, brick: 'stone', door: { x: 1.2, w: 1.4, h: 3, color: '#3b2616', arch: true }, windows: [{ x: 3.6, y: 1.2, w: 1.1, h: 3.2, kind: 'lancet' }, { x: 6.4, y: 1.2, w: 1.1, h: 3.2, kind: 'lancet' }, { x: 3.6, y: 5.2, w: 1.1, h: 2, kind: 'lancet' }, { x: 6.4, y: 5.2, w: 1.1, h: 2, kind: 'lancet' }], roof: 'gable' },
+    zones: [{ x0: 2, x1: 10, y: 6, label: 'Roof strip' }],
+    deliveries: [],
+    event: { type: 'chute', bags: [3, 5, 8, 4, 9, 6], skip: [10.5, 12], car: [7.5, 10], carCost: 250 },
+    budget: 2130, chavs: 2, startX: 14,
+  },
+  {
+    id: 17, name: 'Last Orders', client: 'Nether Wallop Village Hall',
+    brief: "It's the village fete, and Terry's rigged a zip wire from a platform at 5 m on the hall across the road to the pub. Three riders. The wire pulls the top of the scaffold towards the pub, hard.",
+    tip: 'The pull is sideways. Diagonal braces take it to the ground, and wall ties hold the top back. The biggest pull is when a rider is halfway across.',
+    W: 10, H: 6,
+    house: { style: 'hall', x0: 0.5, x1: 9.5, floors: 1, eaves: 4.5, brick: 'red', door: { x: 4.4, w: 1.2, h: 2.3, color: '#2c4a7a' }, windows: [win(1.5, 0, 1.6), win(7, 0, 1.6)], roof: 'gable', sign: 'VILLAGE HALL' },
+    zones: [{ x0: 5, x1: 9, y: 5, label: 'Zip wire' }],
+    deliveries: [],
+    event: { type: 'zip', riders: [{ style: 'terry', name: 'Terry', mass: 125 }, { style: 'sheila', name: 'Sheila', mass: 72 }, { style: 'vicar', name: 'The vicar', mass: 80 }], dx: 16, y: 1.2, sag: 1.4, pre: 700, k: 2.3 },
+    budget: 1250, chavs: 1, startX: 12,
+  },
+  {
+    id: 18, name: 'Pedal Power', client: 'Tyler (aged 12) and his mum',
+    brief: "Tyler's going to ride his BMX out of the leisure centre's first-floor window at 3 m, along your platform, off the end, and into a paddling pool. His mum has agreed to this.",
+    tip: 'He comes off the end at the same speed every time, so the end of the platform decides where he lands. Check the landing spot in the checklist. No gaps, no trap boards.',
+    W: 12, H: 5,
+    house: { style: 'leisure', x0: 0.5, x1: 8.5, floors: 2, eaves: 6, brick: 'render', door: { x: 5, w: 1.8, h: 2.2, color: '#1a6fb8' }, windows: [{ x: 1.4, y: 3.3, w: 1.4, h: 1.5 }, { x: 3.6, y: 3.3, w: 3.6, h: 1.5 }, { x: 1.4, y: 0.6, w: 3, h: 1.6 }], roof: 'flat', sign: 'LEISURE CENTRE' },
+    zones: [{ x0: 2, x1: 8, y: 3, label: 'BMX track' }],
+    deliveries: [{ item: 'hod', zone: 0, x: 5 }],
+    event: { type: 'bmx', start: 2, pool: [16.2, 17.8], v: 6, hop: 1 },
+    budget: 1210, chavs: 2, startX: 11,
+  },
+  {
+    id: 19, name: 'Remember, Remember', client: 'The Dean, St Aldhelm\'s Cathedral',
+    brief: "Terry's doing the Bonfire Night fireworks from a platform at 7 m in the cathedral close. Get the crate up. The stained glass is £300 a pane.",
+    tip: 'Some rockets go wherever they like. The windows marked ⚠ are in the firing line: £35 to board up, or £300 if one goes through.',
+    W: 12, H: 8,
+    house: { style: 'cathedral', x0: 0.5, x1: 11.5, floors: 3, eaves: 12, brick: 'stone', door: { x: 5.2, w: 1.6, h: 3.2, color: '#3b2616', arch: true }, windows: [{ x: 1.5, y: 1.5, w: 1, h: 3.4, kind: 'lancet' }, { x: 9.5, y: 1.5, w: 1, h: 3.4, kind: 'lancet' }, { x: 2.6, y: 7.2, w: 1.1, h: 3, kind: 'lancet' }, { x: 5.3, y: 8, w: 1.4, h: 1.4, kind: 'rose' }, { x: 8.3, y: 7.2, w: 1.1, h: 3, kind: 'lancet' }], roof: 'gable' },
+    zones: [{ x0: 4, x1: 8, y: 7, label: 'Launch platform' }],
+    deliveries: [{ item: 'fireworks', zone: 0, x: 6 }],
+    event: { type: 'fireworks', rockets: 12, launchX: 6, rogue: [-1, -1, 2, -1, -1, 4, -1, -1, 3, -1, -1, -1] },
+    glazier: 300, night: true,
+    budget: 1370, chavs: 2, startX: 14,
+  },
+  {
+    id: 20, name: 'Christmas Eve', client: 'Number 7, Holly Close',
+    brief: "Father Christmas is landing on your platform at 5 m tonight. The sleigh comes in from the left and skids to a stop on the snow, so it needs a long runway, and it shoves the scaffold as it brakes.",
+    tip: 'The sleigh touches down at the left end of the platform. Give it a long unbroken run of real boards, and brace against the push towards the right.',
+    W: 10, H: 6,
+    house: { style: 'terrace', x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'red', door: { x: 4.4, w: 1, h: 2.1, color: '#8a1c2b', wreath: true }, windows: [win(1.5, 0, 1.3), win(7, 0, 1.3), win(1.5, 1, 1.3), win(7, 1, 1.3)], roof: 'gable', chimney: 6 },
+    zones: [{ x0: 1, x1: 5, y: 5, label: 'Sleigh runway' }],
+    deliveries: [{ item: 'presents', zone: 0, x: 4 }],
+    event: { type: 'sleigh', v: 6.5, mu: 0.5, mass: 420 },
+    snow: true, night: true,
+    budget: 1220, chavs: 1, startX: 12,
+  },
+  {
+    id: 21, name: 'Ring Out', client: 'The Bell Ringers\' Guild',
+    brief: "The tenor bell's been recast and it's going back into the belfry at 8 m. It weighs 900 kg. The cathedral wall is fine for ties, but mind the flying buttress.",
+    tip: 'Nine hundred kilos needs a straight path to the ground: heavy tube under the drop, steel deck where it lands.',
+    W: 10, H: 9,
+    house: { style: 'cathedral', x0: 0.5, x1: 9.5, floors: 3, eaves: 14, brick: 'stone', tower: true, door: { x: 1.2, w: 1.4, h: 3, color: '#3b2616', arch: true }, windows: [{ x: 7.4, y: 1.5, w: 1, h: 3.2, kind: 'lancet' }, { x: 4.2, y: 9.2, w: 1.6, h: 2.6, kind: 'louvre' }], roof: 'gable' },
+    forbidden: [{ x0: 8, y0: 0, x1: 10, y1: 5, kind: 'buttress', label: 'Flying buttress' }],
+    zones: [{ x0: 3, x1: 7, y: 8, label: 'Belfry' }],
+    deliveries: [{ item: 'bell', zone: 0, x: 5 }],
+    wind: 8, gust: 10, heavy: true, deck: true,
+    budget: 2370, chavs: 2, startX: 12,
+  },
+  {
+    id: 22, name: 'Glass Act', client: 'Shard & Partners, Canary Row',
+    brief: 'New glass panels for the office tower at 12 m. The wind comes round the building like a train, and the only places to tie in are the floor slabs.',
+    tip: 'Ties only work where the floors are, every 3 m. Three ladders to get Dave up, three platforms for him to step off. Wind grows with height.',
+    W: 10, H: 13,
+    house: { style: 'tower', x0: 0.5, x1: 9.5, floors: 12, eaves: 38, brick: 'render', door: { x: 4, w: 2, h: 2.4, color: '#1c2630' }, windows: [], roof: 'flat', tieRows: [3, 6, 9, 12] },
+    zones: [{ x0: 2, x1: 7, y: 12, label: 'Cladding' }],
+    deliveries: [{ item: 'glass', zone: 0, x: 4.5 }],
+    wind: 12, gust: 14, heavy: true, deck: true,
+    budget: 3040, chavs: 0, startX: 12,
+  },
+  {
+    id: 23, name: 'Penthouse Party', client: 'Kristoff, Penthouse B',
+    brief: "Kristoff's roof-terrace launch party has spilled onto your platform at 9 m. Twelve guests dancing, in the wind, nine metres up.",
+    tip: 'Everything from the pub job, only higher and windier. Tie in at the floor slabs and brace every lift.',
+    W: 10, H: 10,
+    house: { style: 'tower', x0: 0.5, x1: 9.5, floors: 9, eaves: 30, brick: 'render', door: { x: 4, w: 2, h: 2.4, color: '#1c2630' }, windows: [], roof: 'flat', tieRows: [3, 6, 9] },
+    zones: [{ x0: 2, x1: 8, y: 9, label: 'Roof terrace' }],
+    deliveries: [{ item: 'keg', zone: 0, x: 3 }, { item: 'speakers', zone: 0, x: 7 }],
+    event: { type: 'party', guests: 12, dur: 20, beat: 2.1, sway: 170 },
+    wind: 10, gust: 12, heavy: true,
+    budget: 2490, chavs: 0, startX: 12,
+  },
+  {
+    id: 24, name: 'Launch Day', client: 'Wessex Space Agency',
+    brief: "The capsule hatch is 12 m up. Build a crew access tower, get the astronaut's packed lunch up there, then stand well back. Nothing may be tied to the rocket.",
+    tip: 'At ignition the exhaust blasts the whole tower sideways for several seconds. Go wide at the base, heavy tube and lots of triangles.',
+    W: 12, H: 13,
+    house: { style: 'rocket', x0: 0.4, x1: 2.6, floors: 0, eaves: 20, brick: 'render', windows: [], roof: 'flat' },
+    zones: [{ x0: 3, x1: 6, y: 12, label: 'Capsule hatch' }],
+    deliveries: [{ item: 'kit', zone: 0, x: 4 }],
+    event: { type: 'launch', capsuleX: 3.3, blast: 34 },
+    maxTies: 0, wind: 6, gust: 6, heavy: true, deck: true,
+    budget: 4230, chavs: 0, startX: 14,
+  },
 ];
 
 
@@ -1923,6 +2700,17 @@ scene.add(sky);
   scene.environmentIntensity = 0.5;
 }
 scene.fog = new THREE.Fog(0xbfd3e3, 70, 330);
+// a starry sky dome for night jobs, drawn over the daytime sky
+const nightSky = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, map: ((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })((() => {
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 1024; const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 1024); gr.addColorStop(0, '#05070f'); gr.addColorStop(0.45, '#0e1630'); gr.addColorStop(0.52, '#2a2440'); gr.addColorStop(1, '#0a0c14');
+  g.fillStyle = gr; g.fillRect(0, 0, 2048, 1024);
+  for (let i = 0; i < 1400; i++) { const y = Math.random() * 480; g.fillStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.7})`; g.fillRect(Math.random() * 2048, y, Math.random() < 0.1 ? 2 : 1, Math.random() < 0.1 ? 2 : 1); }
+  g.fillStyle = '#fdf6e0'; g.beginPath(); g.arc(1500, 240, 26, 0, 7); g.fill();
+  return c;
+})()) }));
+nightSky.visible = false;
+scene.add(nightSky);
 
 const sun = new THREE.DirectionalLight(0xffeccc, 3.3);
 sun.position.copy(SUN_DIR).multiplyScalar(60);
@@ -1978,10 +2766,24 @@ function facadeTextures(style) {
     red: { h: [8, 18], s: [42, 58], l: [30, 44], mortar: '#b9ae9f' },
     yellow: { h: [34, 44], s: [34, 48], l: [55, 68], mortar: '#cfc6b3' },
     stone: { h: [36, 46], s: [10, 20], l: [60, 72], mortar: '#a79f90' },
-    render: null,
+    render: null, glass: null,
   }[style];
   let draw, bumpDraw;
-  if (!pal) {
+  if (style === 'glass') {
+    // curtain wall: 2 m x 2 m of tinted panels in aluminium mullions, with a few lights on
+    draw = (g) => {
+      g.fillStyle = '#8d979f'; g.fillRect(0, 0, W, H);
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+        const x = c * W / 4 + 10, y = r * H / 2 + 12, w = W / 4 - 20, h = H / 2 - 24;
+        const gr = g.createLinearGradient(x, y, x + w, y + h);
+        const lit = rnd() < 0.18;
+        gr.addColorStop(0, lit ? '#f4e2a8' : '#3f6a86'); gr.addColorStop(1, lit ? '#d9c07a' : '#1e3448');
+        g.fillStyle = gr; g.fillRect(x, y, w, h);
+        g.fillStyle = 'rgba(255,255,255,0.10)'; g.beginPath(); g.moveTo(x, y + h * 0.7); g.lineTo(x + w * 0.6, y); g.lineTo(x + w * 0.8, y); g.lineTo(x, y + h); g.fill();
+      }
+    };
+    bumpDraw = (g) => { g.fillStyle = '#909090'; g.fillRect(0, 0, W, H); g.fillStyle = '#e0e0e0'; for (let c = 0; c <= 4; c++) g.fillRect(c * W / 4 - 6, 0, 12, H); for (let r = 0; r <= 2; r++) g.fillRect(0, r * H / 2 - 6, W, 12); };
+  } else if (!pal) {
     draw = (g) => { noiseFill(g, W, H, '#ece4d4', 0.05, 3); for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(120,110,90,${rnd() * 0.04})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, 30 + rnd() * 120, 0, 7); g.fill(); } g.strokeStyle = 'rgba(0,0,0,.06)'; g.lineWidth = 2; for (let y = 0; y < H; y += H / 4) { g.beginPath(); g.moveTo(0, y + 1); g.lineTo(W, y + 1); g.stroke(); } };
     bumpDraw = (g) => { noiseFill(g, W, H, '#808080', 0.25, 2); g.fillStyle = '#6a6a6a'; for (let y = 0; y < H; y += H / 4) g.fillRect(0, y, W, 3); };
   } else {
@@ -2131,6 +2933,7 @@ const texFromFacade = (style, w, h) => {
   const m2 = map.clone(), b2 = bump.clone();
   m2.needsUpdate = true; b2.needsUpdate = true;
   m2.repeat.set(w / 2, h / 2); b2.repeat.set(w / 2, h / 2);
+  if (style === 'glass') return new THREE.MeshStandardMaterial({ map: m2, bumpMap: b2, bumpScale: 1.2, roughness: 0.22, metalness: 0.35, envMapIntensity: 1.4 });
   return new THREE.MeshStandardMaterial({ map: m2, bumpMap: b2, bumpScale: style === 'render' ? 0.6 : 2.2, roughness: 0.92 });
 };
 
@@ -2179,6 +2982,7 @@ function makeTree(x, z, s = 1, kind = 0) {
   const lawn = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: gt, roughness: 1, color: 0xc4cfa8, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }));
   lawn.receiveShadow = true;
   world.add(lawn);
+  world.userData.lawn = lawn;
   // pavement + kerb + road
   const pv = new THREE.Mesh(new THREE.PlaneGeometry(600, 2.4), new THREE.MeshStandardMaterial({ map: pavementTex, roughness: 0.95 }));
   pv.rotation.x = -Math.PI / 2; pv.position.set(0, 0.045, 9.6); pv.receiveShadow = true; world.add(pv);
@@ -2188,12 +2992,13 @@ function makeTree(x, z, s = 1, kind = 0) {
   for (let x = -150; x < 150; x += 6) box(3, 0.01, 0.14, new THREE.MeshStandardMaterial({ color: 0xe8e6de, roughness: 0.8 }), x, 0.03, 15.4, world, false);
   // front garden walls with gap
   const wallMat = texFromFacade('red', 2, 0.6);
-  box(9, 0.7, 0.3, wallMat, -9.5, 0.35, 8.1);
-  box(9, 0.7, 0.3, wallMat, 9.5, 0.35, 8.1);
-  box(9.3, 0.08, 0.36, M.sill, -9.5, 0.74, 8.1); box(9.3, 0.08, 0.36, M.sill, 9.5, 0.74, 8.1);
+  const sub = world.userData.suburb = [];
+  sub.push(box(9, 0.7, 0.3, wallMat, -9.5, 0.35, 8.1));
+  sub.push(box(9, 0.7, 0.3, wallMat, 9.5, 0.35, 8.1));
+  sub.push(box(9.3, 0.08, 0.36, M.sill, -9.5, 0.74, 8.1)); sub.push(box(9.3, 0.08, 0.36, M.sill, 9.5, 0.74, 8.1));
   // hedges
   const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x3c6b2a, roughness: 1, bumpMap: grassTex, bumpScale: 4 });
-  for (const x of [-16, 16]) box(8, 1.6, 1.2, hedgeMat, x, 0.8, 7.2);
+  for (const x of [-16, 16]) sub.push(box(8, 1.6, 1.2, hedgeMat, x, 0.8, 7.2));
   // trees
   makeTree(-17, -6, 1.5); makeTree(-21, 3, 1.2, 1); makeTree(18, -5, 1.6); makeTree(22, 4, 1.1, 1);
   makeTree(-6, -16, 1.8); makeTree(7, -18, 1.7); makeTree(-30, -10, 1.8); makeTree(30, -14, 1.9);
@@ -2385,6 +3190,52 @@ function syncHatches(L, pieces) {
   levelGroup.add(g);
   manhole = { g, cover, open: 0 };
 }
+// Gin wheel, zip wire anchor and rubble chute, as placed in the design.
+const eventPieces = { wheel: null, cable: null, chute: null, anchor: null };
+const orangeM = new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.6 });
+function syncEventPieces(L, pieces) {
+  for (const k of Object.keys(eventPieces)) { const m = eventPieces[k]; if (m && m.parent) m.parent.remove(m); eventPieces[k] = null; }
+  const E = L.event;
+  if (!E) return;
+  const w = pieces.find(p => p.type === 'wheel');
+  if (w) {
+    const g = new THREE.Group(); g.position.set(w.a[0], w.a[1] + 0.18, Z_OUT + 0.15);
+    const wh = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 8, 20), M.iron); g.add(wh);
+    for (let i = 0; i < 3; i++) { const sp = box(0.3, 0.02, 0.02, M.iron, 0, 0, 0, g, false); sp.rotation.z = i * Math.PI / 3; }
+    const hook = box(0.05, 0.25, 0.05, M.iron, 0, 0.22, 0, g, false);
+    levelGroup.add(g); eventPieces.wheel = g;
+  }
+  const z = pieces.find(p => p.type === 'zip');
+  if (z && E.type === 'zip') {
+    const a = box(0.3, 0.3, 0.12, orangeM, z.a[0], z.a[1] + 0.2, Z_OUT + 0.3, levelGroup);
+    eventPieces.anchor = a;
+    const tx = L.W + E.dx, ty = E.y + 2.2;
+    const x0 = z.a[0], y0 = z.a[1] + 0.2, z0 = Z_OUT + 0.3, z1 = -2.4;
+    const dx = tx - x0, dy = ty - y0, dz = z1 - z0, len = Math.hypot(dx, dy, dz);
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, len, 5), new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.7, roughness: 0.35 }));
+    c.position.set((x0 + tx) / 2, (y0 + ty) / 2, (z0 + z1) / 2);
+    c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / len, dy / len, dz / len));
+    levelGroup.add(c); eventPieces.cable = c;
+  }
+  const ch = pieces.find(p => p.type === 'chute');
+  if (ch && E.type === 'chute') {
+    const g = new THREE.Group(); g.userData = { x: ch.a[0], y: ch.a[1] };
+    const top = { x: ch.a[0] + 0.1, y: ch.a[1] + 0.1, z: Z_OUT + 0.3 }, bot = { x: ch.a[0] + 0.15, y: 1.15, z: 2.3 };
+    const n = Math.max(3, Math.round((top.y - bot.y) / 0.9));
+    for (let i = 0; i < n; i++) {
+      const k0 = i / n, k1 = (i + 1) / n;
+      const ax = top.x + (bot.x - top.x) * k0, ay = top.y + (bot.y - top.y) * k0, az = top.z + (bot.z - top.z) * k0;
+      const bx = top.x + (bot.x - top.x) * k1, by = top.y + (bot.y - top.y) * k1, bz = top.z + (bot.z - top.z) * k1;
+      const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.2, len * 1.02, 12, 1, true), orangeM);
+      c.material.side = THREE.DoubleSide;
+      c.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+      c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(-dx / len, -dy / len, -dz / len));
+      c.castShadow = true; g.add(c);
+    }
+    levelGroup.add(g); eventPieces.chute = g;
+  }
+}
 function windowBreakable(i) { return breakables.find(b => b.kind === 'window' && b.wi === i); }
 function wallChunks(x, y) {
   const bm = new THREE.MeshStandardMaterial({ color: 0x9c4a33, roughness: 0.9 });
@@ -2427,16 +3278,30 @@ function disposeGroup(g) {
 function buildHouse(parent, h, opts = {}) {
   const g = new THREE.Group();
   parent.add(g);
-  const w = h.x1 - h.x0, depth = opts.depth ?? 8, eaves = h.eaves;
+  const churchy = h.style === 'church' || h.style === 'abbey' || h.style === 'cathedral';
+  const depth = opts.depth ?? (churchy ? 12 : h.style === 'tower' ? 14 : 8);
+  const w = h.x1 - h.x0, eaves = h.eaves;
   const cx = (h.x0 + h.x1) / 2;
-  const facade = texFromFacade(h.brick, w, eaves);
-  const side = texFromFacade(h.brick, depth, eaves);
+  const skin = h.style === 'tower' ? 'glass' : h.brick;
+  const facade = texFromFacade(skin, w, eaves);
+  const side = texFromFacade(skin, depth, eaves);
+  if (!opts.pitch && churchy) opts.pitch = h.style === 'cathedral' ? 7 : 5.2;
   const plinth = opts.base ?? 0;
   // main walls
   const body = new THREE.Mesh(new THREE.BoxGeometry(w, eaves - plinth, depth), [side, side, M.dark, M.dark, facade, side]);
   body.position.set(cx, plinth + (eaves - plinth) / 2, -depth / 2);
   body.castShadow = true; body.receiveShadow = true;
   g.add(body);
+  if (h.roof === 'flat') {
+    // parapet and coping; no pitched roof
+    box(w + 0.3, 0.5, depth + 0.3, h.style === 'tower' ? M.dark : M.sill, cx, eaves + 0.25, -depth / 2, g);
+    box(w + 0.4, 0.08, 0.4, M.sill, cx, eaves + 0.54, 0.05, g);
+    if (h.style === 'tower' && h.tieRows) for (let y = 3; y < Math.min(eaves, 60); y += 3) box(w + 0.06, 0.28, 0.1, new THREE.MeshStandardMaterial({ color: 0xb9b7b0, roughness: 0.8 }), cx, y, 0.02, g, false);
+    if (h.style === 'leisure') for (const [yy, col] of [[2.6, 0x1a6fb8], [2.85, 0x2dbf8a]]) box(w + 0.04, 0.22, 0.06, new THREE.MeshStandardMaterial({ color: col, roughness: 0.5 }), cx, yy, 0.03, g, false);
+    (h.windows || []).forEach((wd, i) => addWindow(g, wd, h.brick, opts.main, i));
+    if (h.door) addDoor(g, h.door);
+    return g;
+  }
   // gable roof: ridge parallel to facade
   const pitch = opts.pitch ?? 3.4, over = 0.35;
   const roofMat = new THREE.MeshStandardMaterial({ map: (h.brick === 'stone' || h.brick === 'render') ? slateTex.clone() : tileTex.clone(), roughness: 0.8 });
@@ -2463,6 +3328,16 @@ function buildHouse(parent, h, opts = {}) {
     m.castShadow = true; g.add(m);
   }
   box(w + 2 * over, 0.14, 0.2, M.dark, cx, eaves + pitch + 0.05, -depth / 2, g);
+  if (opts.snow) {
+    const snowM = new THREE.MeshStandardMaterial({ color: 0xf6f8fb, roughness: 0.9 });
+    for (const sgn of [1, -1]) {
+      const slopeL = Math.hypot(depth / 2 + over, pitch);
+      const r = new THREE.Mesh(new THREE.BoxGeometry(w + 2 * over + 0.02, 0.14, slopeL * 0.96), snowM);
+      r.rotation.x = sgn * Math.atan2(pitch, depth / 2 + over);
+      r.position.set(cx, eaves + pitch / 2 + 0.12, -depth / 2 + sgn * (depth / 2 + over) / 2);
+      r.castShadow = true; g.add(r);
+    }
+  }
   // fascia + gutter
   box(w + 2 * over, 0.22, 0.04, M.white, cx, eaves - 0.02, over - 0.02, g);
   const gl = w + 2 * over, nseg = Math.max(1, Math.round(gl / 1.6));
@@ -2494,8 +3369,36 @@ function buildHouse(parent, h, opts = {}) {
   return g;
 }
 
+const stainedTex = canvasTex(128, 256, (g, w, h) => {
+  const cols = ['#b3202f', '#1f4fa8', '#e2b62d', '#2f8a45', '#7a2fa0', '#d86a1c'];
+  g.fillStyle = '#1a1a1a'; g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 16) for (let x = 0; x < w; x += 16) { g.fillStyle = cols[(x * 7 + y * 3 + ((x ^ y) >> 3)) % cols.length]; g.globalAlpha = 0.85; g.fillRect(x + 1.5, y + 1.5, 13, 13); }
+  g.globalAlpha = 1; g.strokeStyle = '#111'; g.lineWidth = 4; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.moveTo(0, h * 0.62); g.lineTo(w, h * 0.62); g.stroke();
+});
+const stainedMat = new THREE.MeshStandardMaterial({ map: stainedTex, roughness: 0.3, emissive: 0x442211, emissiveIntensity: 0.25 });
+function lancetShape(w, h) {
+  const s = new THREE.Shape(), r = w / 2, archH = w * 0.85;
+  s.moveTo(-r, 0); s.lineTo(r, 0); s.lineTo(r, h - archH);
+  s.quadraticCurveTo(r, h - archH * 0.3, 0, h); s.quadraticCurveTo(-r, h - archH * 0.3, -r, h - archH); s.lineTo(-r, 0);
+  return s;
+}
 function addWindow(g, wd, brick, reg, wi) {
   const { x, y, w, h } = wd;
+  if (wd.kind === 'lancet' || wd.kind === 'rose' || wd.kind === 'louvre') {
+    const cx = x + w / 2;
+    const geo = wd.kind === 'rose' ? new THREE.CircleGeometry(w / 2, 32) : new THREE.ShapeGeometry(lancetShape(w, h));
+    const uv = geo.attributes.uv, pos = geo.attributes.position;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + w / 2) / w, wd.kind === 'rose' ? (pos.getY(i) + w / 2) / w : pos.getY(i) / h);
+    const glass = new THREE.Mesh(geo, wd.kind === 'louvre' ? M.dark : stainedMat);
+    glass.position.set(cx, wd.kind === 'rose' ? y + h / 2 : y, 0.02); g.add(glass);
+    const surroundGeo = wd.kind === 'rose' ? new THREE.RingGeometry(w / 2, w / 2 + 0.14, 32) : (() => { const o = lancetShape(w + 0.28, h + 0.16); o.holes.push(lancetShape(w, h)); return new THREE.ShapeGeometry(o); })();
+    const sur = new THREE.Mesh(surroundGeo, M.sill); sur.position.set(cx, wd.kind === 'rose' ? y + h / 2 : y - 0.08, 0.03); sur.castShadow = true; g.add(sur);
+    const parts = [glass, sur];
+    if (wd.kind === 'louvre') for (let yy = y + 0.2; yy < y + h - 0.6; yy += 0.24) { const sl = box(w - 0.1, 0.05, 0.14, M.bark, cx, yy, 0.06, g, false); sl.rotation.x = 0.6; parts.push(sl); }
+    else parts.push(box(w + 0.35, 0.08, 0.22, M.sill, cx, y - 0.06, 0.08, g));
+    if (reg) makeBreakable('window', parts, g, { glass, rz: 1.3, wi });
+    return;
+  }
   const cx = x + w / 2, cy = y + h / 2;
   // interior glow + curtains behind glass
   const inside = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ color: 0x2e2a26, roughness: 1 }));
@@ -2520,6 +3423,19 @@ function addWindow(g, wd, brick, reg, wi) {
 function addDoor(g, dr) {
   const { x, w, h, color } = dr;
   const cx = x + w / 2;
+  if (dr.arch) {
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, map: woodTex });
+    const d = new THREE.Mesh(new THREE.ShapeGeometry(lancetShape(w, h)), mat); d.position.set(cx, 0, 0.03); g.add(d);
+    const o = lancetShape(w + 0.36, h + 0.22); o.holes.push(lancetShape(w, h));
+    const sur = new THREE.Mesh(new THREE.ShapeGeometry(o), M.sill); sur.position.set(cx, 0, 0.04); g.add(sur);
+    for (const dy of [0.7, 1.7]) box(w, 0.06, 0.03, M.iron, cx, dy, 0.05, g, false);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.015, 6, 12), M.iron); ring.position.set(cx + w * 0.3, 1.1, 0.06); g.add(ring);
+    return;
+  }
+  if (dr.wreath) {
+    const wr = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.07, 8, 18), M.leaf2); wr.position.set(cx, 1.55, 0.12); wr.castShadow = true; g.add(wr);
+    for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 5), new THREE.MeshStandardMaterial({ color: 0xd8203a })); const a = i * 1.05; b.position.set(cx + Math.cos(a) * 0.2, 1.55 + Math.sin(a) * 0.2, 0.19); g.add(b); }
+  }
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.05 });
   box(w, h - 0.35, 0.06, mat, cx, (h - 0.35) / 2, 0.02, g);
   box(w * 0.34, (h - 0.35) * 0.36, 0.02, mat, cx - w * 0.22, (h - 0.35) * 0.72, 0.06, g, false);
@@ -2555,13 +3471,23 @@ function buildLevelScene(L) {
   root.position.x = -L.W / 2;
   const G = levelGroup;
   breakables = []; clearTags(); sceneDirty = false;
-  buildHouse(G, L.house, { main: true });
+  const style = L.house.style || 'terrace';
+  if (style !== 'rocket') buildHouse(G, L.house, { main: true, snow: L.snow });
+  // world dressing that doesn't suit every job
+  const lawn = world.userData.lawn;
+  if (!lawn.userData.map) lawn.userData.map = lawn.material.map;
+  lawn.material.map = L.snow || style === 'rocket' || style === 'tower' ? null : lawn.userData.map;
+  lawn.material.color.set(L.snow ? 0xeef2f6 : style === 'rocket' ? 0xb8a57c : style === 'tower' ? 0x9a9c9e : 0xc4cfa8);
+  lawn.material.needsUpdate = true;
+  for (const m of world.userData.suburb) m.visible = style !== 'rocket' && style !== 'tower';
   // neighbours
-  const nb = [
+  const nbAll = [
     { x0: L.house.x0 - 12, x1: L.house.x0 - 3.5, eaves: 6, brick: L.house.brick === 'red' ? 'yellow' : 'red', windows: [{ x: L.house.x0 - 10.5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 10.5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x0 - 5.4, w: 1, h: 2.1, color: '#355c7d' }, chimney: L.house.x0 - 9 },
     { x0: L.house.x1 + 3.5, x1: L.house.x1 + 12, eaves: 6, brick: L.house.brick === 'stone' ? 'render' : 'stone', windows: [{ x: L.house.x1 + 5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x1 + 7.2, w: 1, h: 2.1, color: '#a23b2a' }, chimney: L.house.x1 + 6 },
   ];
-  for (const n of nb) { const hg = buildHouse(G, n); hg.position.z = -2.5; }
+  const nb = ['church', 'abbey', 'cathedral', 'rocket', 'tower'].includes(style) ? [] : style === 'leisure' || style === 'hall' ? [nbAll[0]] : nbAll;
+  for (const n of nb) { const hg = buildHouse(G, { ...n, style: 'terrace' }, { snow: L.snow }); hg.position.z = -2.5; }
+  buildTheme(G, L, style);
   // paved strip in front, stepped by column
   const x0 = -9 + L.W / 2, x1 = 9 + L.W / 2;
   let runStart = x0, runG = L.groundAt(x0 + 0.01);
@@ -2611,6 +3537,18 @@ function buildLevelScene(L) {
   // no-base zones (rose beds)
   for (const nb2 of L.noBase) {
     const [a, b, kind] = nb2;
+    if (kind === 'graves') {
+      const stoneM = new THREE.MeshStandardMaterial({ color: 0x8e8b84, roughness: 0.95 });
+      for (let x = a; x <= b; x += 1) for (const z of [1.0, 2.4]) {
+        const p = [];
+        const st = box(0.5, 0.75, 0.12, stoneM, x, 0.37, z, G); p.push(st);
+        const top = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.12, 14, 1, false, 0, Math.PI), stoneM); top.rotation.x = Math.PI / 2; top.rotation.z = Math.PI / 2; top.rotation.y = Math.PI / 2; top.position.set(x, 0.75, z); top.castShadow = true; G.add(top); p.push(top);
+        makeBreakable('pot', p, G);
+      }
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3), new THREE.MeshStandardMaterial({ map: labelTex('R.I.P.\nNO BASE PLATES'), roughness: 0.8 }));
+      sg.position.set(a + 0.9, 0.9, 3.1); G.add(sg);
+      continue;
+    }
     if (kind === 'roses') {
       const bedA = a - 0.45, bedB = b + 0.45;
       const soil = box(bedB - bedA, 0.08, STRIP_D - 0.4, new THREE.MeshStandardMaterial({ color: 0x3b2a1c, roughness: 1 }), (bedA + bedB) / 2, 0.04, STRIP_D / 2 + 0.1, G, false);
@@ -2629,6 +3567,12 @@ function buildLevelScene(L) {
   }
   // forbidden zones: porch canopy or door mats
   for (const f of L.forbidden) {
+    if (f.kind === 'buttress') {
+      const stoneM = texFromFacade('stone', 1.2, 6);
+      box(1.1, f.y1 + 1.2, 1.4, stoneM, (f.x0 + f.x1) / 2 + 0.3, (f.y1 + 1.2) / 2, 0.8, G);
+      const arch = box(2.6, 0.6, 0.9, stoneM, (f.x0 + f.x1) / 2 - 0.4, f.y1 + 1.6, 0.45, G); arch.rotation.z = 0.5;
+      for (const dx of [0, 0.5]) box(0.25, 0.8, 0.25, M.sill, (f.x0 + f.x1) / 2 + 0.3 + dx - 0.25, f.y1 + 1.6, 0.8, G);
+    }
     if (f.kind === 'porch') {
       const cw = f.x1 - f.x0 - 0.4;
       const cmx = (f.x0 + f.x1) / 2;
@@ -2649,7 +3593,7 @@ function buildLevelScene(L) {
     }
   }
   // garden clutter for the scaffold to flatten
-  addProps(G, L);
+  if (!['church', 'abbey', 'cathedral', 'tower', 'rocket', 'leisure'].includes(style)) addProps(G, L);
   // windsock for windy jobs
   windsock = null;
   if (L.wind > 0) {
@@ -2671,6 +3615,168 @@ function buildLevelScene(L) {
   pile.rotation.y = 0.3;
 }
 
+function signTex(text, bg = '#1f3b2c', fg = '#f1d38a') {
+  return canvasTex(1024, 160, (g, w, h) => {
+    g.fillStyle = bg; g.fillRect(0, 0, w, h); g.strokeStyle = fg; g.lineWidth = 8; g.strokeRect(10, 10, w - 20, h - 20);
+    g.fillStyle = fg; g.font = '700 84px "Big Shoulders Stencil Display", Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, h / 2 + 4);
+  });
+}
+function bunting(G, x0, x1, y, z, sag = 0.35) {
+  const cols = [0xd8203a, 0xf3d40b, 0x1f6fd1, 0xffffff, 0x2f9a4a];
+  const n = Math.max(4, Math.round((x1 - x0) / 0.35));
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1), x = x0 + (x1 - x0) * t, yy = y - sag * 4 * t * (1 - t);
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 3), new THREE.MeshStandardMaterial({ color: cols[i % cols.length], roughness: 0.8, side: THREE.DoubleSide }));
+    f.rotation.x = Math.PI; f.position.set(x, yy - 0.12, z); G.add(f);
+  }
+  const line = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, x1 - x0, 4), M.dark); line.rotation.z = Math.PI / 2; line.position.set((x0 + x1) / 2, y - sag * 0.7, z); G.add(line);
+}
+function buildTheme(G, L, style) {
+  const h = L.house, E = L.event || {};
+  const stoneM = texFromFacade('stone', 2, 2);
+  if (h.sign) {
+    const tex = signTex(h.sign, style === 'leisure' ? '#1a6fb8' : style === 'hall' ? '#f4efe2' : '#1f3b2c', style === 'leisure' ? '#ffffff' : style === 'hall' ? '#2c4a7a' : '#f1d38a');
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(7, h.x1 - h.x0 - 1), 0.62), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }));
+    sg.position.set((h.x0 + h.x1) / 2, style === 'leisure' ? h.eaves - 0.6 : style === 'hall' ? 3.2 : 2.75, 0.05); G.add(sg);
+  }
+  if (style === 'pub') {
+    for (const x of [h.x0 + 0.9, h.x1 - 0.9]) {
+      const bk = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.leaf); bk.rotation.x = Math.PI; bk.position.set(x, 2.55, 0.35); G.add(bk);
+      for (let i = 0; i < 5; i++) { const f = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), new THREE.MeshStandardMaterial({ color: [0xd8203a, 0xf06a8c, 0xfff1f0][i % 3] })); f.position.set(x + (i - 2) * 0.1, 2.45, 0.55); G.add(f); }
+    }
+    bunting(G, h.x0, h.x1, h.eaves - 0.3, 0.25, 0.4);
+    for (const x of [1.5, L.W - 1.5]) { box(1.4, 0.06, 0.5, M.bark, x, 0.72, 3.0, G); for (const dz of [-0.45, 0.45]) box(1.4, 0.05, 0.25, M.bark, x, 0.45, 3.0 + dz, G); }
+  }
+  if (style === 'mill') {
+    const ld = h.loadingDoors;
+    for (let f = 0; f < 3; f++) box(1.1, 1.8, 0.06, new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.8, map: woodTex }), ld, 0.8 + f * 3 + 0.9, 0.04, G);
+    const beam = box(0.2, 0.2, 1.6, M.bark, ld, h.eaves - 0.2, 0.6, G);
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.5, 24), new THREE.MeshStandardMaterial({ color: 0x4a3526, roughness: 0.9, map: woodTex }));
+    wheel.rotation.x = Math.PI / 2; wheel.rotation.z = Math.PI / 2; wheel.position.set(h.x0 - 0.35, 2.4, -3); wheel.castShadow = true; G.add(wheel);
+  }
+  if (style === 'church') {
+    // west tower and spire off to the left
+    const tx0 = h.x0 - 4.2, tw = 3.6, th = 14;
+    const tm = texFromFacade('stone', tw, th);
+    box(tw, th, tw, tm, tx0 + tw / 2, th / 2, -tw / 2 - 1, G);
+    const sp = new THREE.Mesh(new THREE.ConeGeometry(tw * 0.62, 8, 4), new THREE.MeshStandardMaterial({ map: slateTex, roughness: 0.8 }));
+    sp.rotation.y = Math.PI / 4; sp.position.set(tx0 + tw / 2, th + 4, -tw / 2 - 1); sp.castShadow = true; G.add(sp);
+    const clock = new THREE.Mesh(new THREE.CircleGeometry(0.6, 24), new THREE.MeshStandardMaterial({ color: 0x1b2a3a, roughness: 0.4 })); clock.position.set(tx0 + tw / 2, th - 2, 0.82 - 1 + 0.2); G.add(clock);
+    box(0.05, 0.45, 0.02, M.brass, tx0 + tw / 2, th - 1.8, -0.0, G, false);
+    for (const [x, z, s2] of [[-6, 4.5, 1.1], [L.W + 3, 4, 1.3], [L.W + 6, -2, 1.5]]) { const t = new THREE.Mesh(new THREE.ConeGeometry(1.1 * s2, 3.4 * s2, 8), M.leaf2); t.position.set(x, 1.7 * s2, z); t.castShadow = true; G.add(t); }
+    for (const x of [-2.5, L.W + 1.2, L.W + 2.2]) for (const z of [4.3, 5.4]) { const st = box(0.5, 0.75, 0.12, new THREE.MeshStandardMaterial({ color: 0x8e8b84, roughness: 0.95 }), x, 0.37, z, G); }
+  }
+  if (style === 'abbey' || style === 'cathedral') {
+    // buttresses between the windows, pinnacles along the top
+    const wins = h.windows || [];
+    const clear = (x) => !wins.some(w => x > w.x - 0.4 && x < w.x + w.w + 0.4) && !(h.door && x > h.door.x - 0.4 && x < h.door.x + h.door.w + 0.4);
+    for (let x = h.x0 + 0.3; x <= h.x1 - 0.3; x += 0.5) if (clear(x) && (Math.round((x - h.x0) * 2) % 5 === 0)) {
+      box(0.45, h.eaves * 0.62, 0.35, stoneM, x, h.eaves * 0.31, 0.17, G);
+      const pin = new THREE.Mesh(new THREE.ConeGeometry(0.2, 1.1, 4), M.sill); pin.position.set(x, h.eaves + 0.55, 0.12); pin.castShadow = true; G.add(pin);
+    }
+    if (style === 'cathedral' && h.tower) {
+      box(h.x1 - h.x0 + 0.4, 0.5, 0.4, M.sill, (h.x0 + h.x1) / 2, 8.9, 0.15, G);
+      box(h.x1 - h.x0 + 0.4, 0.5, 0.4, M.sill, (h.x0 + h.x1) / 2, 12.6, 0.15, G);
+    }
+    if (style === 'cathedral') {
+      for (const x of [h.x0 - 1.6, h.x1 + 1.6]) {
+        const tm = texFromFacade('stone', 3, h.eaves + 6);
+        box(3, h.eaves + 6, 3, tm, x, (h.eaves + 6) / 2, -1.2, G);
+        for (const dx of [-1.2, 1.2]) { const pin = new THREE.Mesh(new THREE.ConeGeometry(0.28, 2, 4), M.sill); pin.position.set(x + dx, h.eaves + 7, -0.1); G.add(pin); }
+      }
+    }
+    for (const [x, z] of [[-4, 4.5], [L.W + 4, 4.8]]) { const t = new THREE.Mesh(new THREE.ConeGeometry(1.2, 3.6, 8), M.leaf2); t.position.set(x, 1.8, z); t.castShadow = true; G.add(t); }
+  }
+  if (E.type === 'chute') {
+    // the skip, and the Bishop's car right next to it
+    const [s0, s1] = E.skip;
+    const skipM = new THREE.MeshStandardMaterial({ color: 0xf0b90b, roughness: 0.6, metalness: 0.2 });
+    const sk = new THREE.Group(); G.add(sk); sk.position.set((s0 + s1) / 2, 0, 2.3);
+    const mk = (w, hh, d, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), skipM); m.position.set(x, y, z); m.castShadow = true; sk.add(m); };
+    const sw = s1 - s0 + 0.6;
+    mk(sw, 0.1, 1.5, 0, 0.1, 0); mk(sw, 1.0, 0.08, 0, 0.6, -0.75); mk(sw, 1.0, 0.08, 0, 0.6, 0.75); mk(0.08, 1.0, 1.5, -sw / 2, 0.6, 0); mk(0.08, 1.0, 1.5, sw / 2, 0.6, 0);
+    const [c0, c1] = E.car;
+    const car = new THREE.Group(); G.add(car); car.position.set((c0 + c1) / 2, 0, 3.6);
+    const paint = new THREE.MeshPhysicalMaterial({ color: 0x5a1f6e, roughness: 0.25, metalness: 0.6, clearcoat: 1 });
+    const body = new THREE.Mesh(new RoundedBoxGeometry(c1 - c0 + 0.8, 0.7, 1.7, 3, 0.2), paint); body.position.y = 0.6; body.castShadow = true; car.add(body);
+    const cab = new THREE.Mesh(new RoundedBoxGeometry(1.6, 0.55, 1.5, 3, 0.15), M.glass); cab.position.set(-0.1, 1.15, 0); car.add(cab);
+    for (const dx of [-0.95, 0.95]) for (const dz of [-0.8, 0.8]) { const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16), M.dark); wh.rotation.x = Math.PI / 2; wh.position.set(dx, 0.3, dz); car.add(wh); }
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.16), new THREE.MeshStandardMaterial({ map: labelTex('BI5HOP'), roughness: 0.6 })); plate.position.set(0, 0.55, 0.86); car.add(plate);
+    G.userData.car = car;
+  }
+  if (E.type === 'zip' || style === 'hall') {
+    // the pub across the road the zip wire runs to
+    const px = L.W + (E.dx || 16);
+    const pub = buildHouse(G, { style: 'pub', x0: px - 1.5, x1: px + 6, eaves: 5, brick: 'render', windows: [{ x: px - 0.6, y: 0.9, w: 1.4, h: 1.3 }, { x: px + 3.6, y: 0.9, w: 1.4, h: 1.3 }], door: { x: px + 1.6, w: 1, h: 2.1, color: '#1f3b2c' } });
+    pub.position.z = -2.5;
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(5, 0.55), new THREE.MeshStandardMaterial({ map: signTex('THE DOG & DUCK'), roughness: 0.6 })); sg.position.set(px + 2.2, 2.6, -2.4); G.add(sg);
+    bunting(G, 0.2, L.W - 0.2, 4.2, 3.2, 0.5);
+    for (const [x, col] of [[2, 0xd8203a], [6.5, 0x1f6fd1]]) {
+      const stall = new THREE.Group(); stall.position.set(x, 0, 5.2); G.add(stall);
+      box(1.8, 0.8, 0.8, M.bark, 0, 0.4, 0, stall);
+      const can = new THREE.Mesh(new THREE.BoxGeometry(2, 0.06, 1.2), new THREE.MeshStandardMaterial({ color: col, roughness: 0.7 })); can.position.y = 2.0; can.rotation.x = -0.15; stall.add(can);
+      for (const dx of [-0.9, 0.9]) box(0.05, 2, 0.05, M.white, dx, 1, -0.5, stall);
+    }
+  }
+  if (E.type === 'bmx') {
+    const [p0, p1] = E.pool;
+    const pool = new THREE.Group(); G.add(pool); pool.position.set((p0 + p1) / 2, 0, Z_MID);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry((p1 - p0) / 2, 0.22, 10, 32), new THREE.MeshStandardMaterial({ color: 0x3fa9f5, roughness: 0.4 }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.22; pool.add(ring);
+    const water = new THREE.Mesh(new THREE.CircleGeometry((p1 - p0) / 2 - 0.05, 32), new THREE.MeshStandardMaterial({ color: 0x6fd0ff, roughness: 0.1, transparent: true, opacity: 0.85 }));
+    water.rotation.x = -Math.PI / 2; water.position.y = 0.3; pool.add(water);
+    const duck = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffd12d })); duck.position.set(0.3, 0.38, 0.2); pool.add(duck);
+    const sgn = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), new THREE.MeshStandardMaterial({ map: labelTex('LANDING\nZONE'), roughness: 0.8 })); sgn.position.set(0, 1.1, -1.3); pool.add(sgn);
+    const post = box(0.05, 1, 0.05, M.bark, 0, 0.5, -1.32, pool);
+  }
+  if (E.type === 'fireworks') {
+    // bonfire in the close
+    const bx = -3.5;
+    for (let i = 0; i < 9; i++) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.2, 6), M.bark); l.position.set(bx + Math.cos(i * 0.7) * 0.4, 0.8, 4.5 + Math.sin(i * 0.7) * 0.4); l.rotation.set(Math.sin(i) * 0.5, 0, Math.cos(i * 1.3) * 0.5); G.add(l); }
+    const fire = new THREE.PointLight(0xff7a2a, 30, 14); fire.position.set(bx, 1.4, 4.5); G.add(fire);
+    G.userData.fire = { light: fire, x: bx, z: 4.5 };
+  }
+  if (L.snow) {
+    const snowM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+    const sm = new THREE.Group(); sm.position.set(-2.5, 0, 4.5); G.add(sm);
+    for (const [r, y] of [[0.45, 0.42], [0.32, 1.1], [0.22, 1.6]]) { const b = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), snowM); b.position.y = y; b.castShadow = true; sm.add(b); }
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.2, 8), new THREE.MeshStandardMaterial({ color: 0xff7a1a })); nose.rotation.x = Math.PI / 2; nose.position.set(0, 1.6, 0.25); sm.add(nose);
+    // fairy lights along the gutter
+    const lightsCol = [0xff4040, 0x40ff60, 0x4080ff, 0xffd040];
+    for (let x = h.x0; x <= h.x1; x += 0.35) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 5), new THREE.MeshStandardMaterial({ color: lightsCol[Math.round(x / 0.35) % 4], emissive: lightsCol[Math.round(x / 0.35) % 4], emissiveIntensity: 2 })); b.position.set(x, h.eaves - 0.25 - 0.08 * Math.abs(Math.sin(x * 2)), 0.45); G.add(b); }
+    box(18, 0.03, STRIP_D, snowM, L.W / 2, 0.012, STRIP_D / 2, G, false);
+  }
+  if (style === 'tower') {
+    for (const [x, hh, z, wdt] of [[-10, 46, -4, 8], [L.W + 9, 58, -6, 9], [-22, 34, -10, 10], [L.W + 22, 40, -12, 10]]) {
+      const tm = texFromFacade('glass', wdt, hh);
+      box(wdt, hh, wdt, tm, x, hh / 2, z - wdt / 2, G);
+    }
+    for (const x of [0, L.W]) { const planter = box(1.4, 0.5, 1.0, M.stoneWall, x, 0.25, 3.0, G); const t = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 1), M.leaf); t.position.set(x, 0.9, 3.0); G.add(t); }
+  }
+  if (style === 'rocket') buildRocket(G, L);
+}
+const rocketParts = { g: null, flame: null, y0: 0 };
+function buildRocket(G, L) {
+  const h = L.house, cx = (h.x0 + h.x1) / 2, r = (h.x1 - h.x0) / 2;
+  const g = new THREE.Group(); G.add(g); g.position.set(cx, 0, -r - 0.05);
+  const white = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.45, metalness: 0.1 });
+  const black = new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.5 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h.eaves - 4, 32), white); body.position.y = 1.2 + (h.eaves - 4) / 2; body.castShadow = true; g.add(body);
+  for (const y of [3, 7, 11]) { const b = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.01, r + 0.01, 0.6, 32), black); b.position.y = y; g.add(b); }
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(r, 4, 32), white); nose.position.y = h.eaves - 2.8 + 2; nose.castShadow = true; g.add(nose);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), new THREE.MeshStandardMaterial({ map: labelTex('WSA\nWESSEX', '#1f3b73', '#ffffff'), roughness: 0.6 })); flag.position.set(0, 6, r + 0.01); g.add(flag);
+  const hatch = new THREE.Mesh(new THREE.CircleGeometry(0.4, 20), black); hatch.rotation.y = Math.PI / 2; hatch.position.set(r + 0.01, L.zones[0].y + 1.0, 0); g.add(hatch);
+  for (let i = 0; i < 4; i++) { const fin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.2, 1.1), black); const a = i * Math.PI / 2 + Math.PI / 4; fin.position.set(Math.cos(a) * (r + 0.4), 2.2, Math.sin(a) * (r + 0.4)); fin.rotation.y = -a; g.add(fin); }
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.6, r * 0.85, 1.2, 24), black); nozzle.position.y = 0.6; g.add(nozzle);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(r * 0.9, 6, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xffb24a, transparent: true, opacity: 0.85, depthWrite: false }));
+  flame.rotation.x = Math.PI; flame.position.y = -3; flame.visible = false; g.add(flame);
+  rocketParts.g = g; rocketParts.flame = flame; rocketParts.y0 = 0;
+  // launch pad and flame trench
+  box(8, 0.3, 8, M.stoneWall, cx, 0.15, -r, G);
+  box(3.2, 0.32, 3.2, M.dark, cx, 0.16, -r, G);
+  for (const [x, z] of [[-6, 3], [L.W + 5, 4], [L.W + 8, -3]]) { const cac = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 2, 8), M.leaf2); cac.position.set(x, 1, z); G.add(cac); }
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.6), new THREE.MeshStandardMaterial({ map: labelTex('DANGER\nLAUNCH AREA', '#f3d40b', '#161b21'), roughness: 0.7 })); sign.position.set(L.W + 2, 1.2, 4.5); G.add(sign);
+}
 function addProps(G, L) {
   const clear = (x) => x > 0.3 && x < L.W - 0.3 && !L.forbidden.some(f => x > f.x0 - 0.6 && x < f.x1 + 0.6) && !L.noBase.some(([a, b]) => x > a - 0.8 && x < b + 0.8) && L.groundAt(x) === 0;
   const spots = [];
@@ -2855,6 +3961,13 @@ class ScaffoldView {
     }
     // ladders: aluminium, leaning on the outer frame, running 1 m past the landing
     for (const l of sim.ladders || []) {
+      if (l.pulled) {
+        // pulled up and laid on the platform
+        const top = nodes[l.top], len = (l.len || 3) + 1, y = top.y + 0.2, x1 = top.x + 0.3, x0 = x1 - len;
+        for (const dz of [-0.2, 0.2]) this.alu.push(segMatrix(x0, y, Z_MID + dz, x1, y, Z_MID + dz, 1.25), COL.alu);
+        for (let x = x0 + 0.25; x < x1 - 0.05; x += 0.28) this.alu.push(segMatrix(x, y, Z_MID - 0.2, x, y, Z_MID + 0.2, 0.8), COL.alu);
+        continue;
+      }
       const F = sim.ladderFoot(l), top = nodes[l.top];
       let dx = top.x - F.x, dy = top.y - F.y;
       const len0 = Math.hypot(dx, dy) || 1; dx /= len0; dy /= len0;
@@ -2890,6 +4003,17 @@ const STYLES = {
   police: { top: 0xc8f000, vest: true, glow: 0x88aa00, sleeve: 0x1b2233, legs: 0x1b2233, shoe: 0x111111, hat: 'police', hatCol: 0x141c2e, skin: 0xe8b996 },
   sheila: { top: 0xf2a7c3, sleeve: 0xf2a7c3, legs: 0xf6dfe6, shoe: 0xff8fbf, hat: 'curlers', hatCol: 0x9a6a44, skin: 0xf0c4a4, gown: 0xf2a7c3, trim: 0xfff4f7 },
   agency: { top: 0xf3d40b, vest: true, glow: 0x886600, sleeve: 0x55595e, legs: 0x3b5a85, shoe: 0x2a2a2a, hat: 'hard', hatCol: 0x2a6bd6, skin: 0xc98e6a },
+  guest0: { top: 0xe0408a, sleeve: 0xe0408a, legs: 0x2b3f6b, shoe: 0x222222, hat: 'party', hatCol: 0xf3d40b, skin: 0xe7b48f, stripe: 0xffffff },
+  guest1: { top: 0x2dbf8a, sleeve: 0x2dbf8a, legs: 0x2a2d33, shoe: 0xf6f6f6, hat: 'party', hatCol: 0xd8203a, skin: 0x8d5a3b, stripe: 0x1a6f4f },
+  guest2: { top: 0xf3d40b, sleeve: 0xf3d40b, legs: 0x3b5a85, shoe: 0x5a3a22, hat: 'hair', hatCol: 0x3b2a1c, skin: 0xf2c9a8, stripe: 0xb8950a },
+  guest3: { top: 0x7a2fa0, sleeve: 0x7a2fa0, legs: 0x1b1d20, shoe: 0x222222, hat: 'party', hatCol: 0x1f6fd1, skin: 0xc98e6a, stripe: 0xffffff },
+  guest4: { top: 0xff7a1a, sleeve: 0xff7a1a, legs: 0x3b5a85, shoe: 0xf6f6f6, hat: 'hair', hatCol: 0x111111, skin: 0x6b4128, stripe: 0xffffff },
+  guest5: { top: 0xf4f2ec, sleeve: 0xf4f2ec, legs: 0x2b3f6b, shoe: 0x3a2a1c, hat: 'party', hatCol: 0x2f9a4a, skin: 0xefc3a0, stripe: 0xd8203a },
+  terry: { top: 0xf3d40b, vest: true, glow: 0x886600, sleeve: 0xf4f2ec, legs: 0x2a2d33, shoe: 0x3a2a1c, hat: 'hard', hatCol: 0xf6f6f2, skin: 0xd99c7d, scale: 1.12 },
+  vicar: { top: 0x15171a, sleeve: 0x15171a, legs: 0x15171a, shoe: 0x111111, hat: 'hair', hatCol: 0xb8b8b8, skin: 0xefc3a0, stripe: 0x15171a, collar: true },
+  tyler: { top: 0x19a974, sleeve: 0x19a974, legs: 0x2b3f6b, shoe: 0xf6f6f6, hat: 'helmet', hatCol: 0xd8203a, skin: 0xe0a987, stripe: 0xffffff, scale: 0.82 },
+  santa: { top: 0xc8102e, sleeve: 0xc8102e, legs: 0xc8102e, shoe: 0x111111, hat: 'santa', hatCol: 0xc8102e, skin: 0xf0c4a4, stripe: 0xffffff, beard: true },
+  astro: { top: 0xeeeeee, sleeve: 0xeeeeee, legs: 0xeeeeee, shoe: 0xaaaaaa, hat: 'astro', hatCol: 0xffffff, skin: 0xe0a987, stripe: 0x1f3b73 },
   chav3: { top: 0x161616, sleeve: 0x161616, legs: 0x161616, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xb0122a, skin: 0xd79e7a, stripe: 0xffffff, can: 0xffd12d },
 };
 const personMats = {};
@@ -2911,6 +4035,23 @@ function addHat(parent, st, mt, part) {
     const h = part(new THREE.SphereGeometry(0.14, 16, 12), mt.hat, 0, 0.12, 0, parent); h.scale.set(1, 1.55, 1.05);
     part(new THREE.CylinderGeometry(0.15, 0.15, 0.03, 16), mt.hat, 0, 0.04, 0, parent);
     part(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshStandardMaterial({ color: 0xdfe4e8, metalness: 0.9, roughness: 0.2 }), 0, 0.17, 0.13, parent);
+  } else if (st.hat === 'party') {
+    const c = part(new THREE.ConeGeometry(0.09, 0.3, 12), mt.hat, 0.02, 0.24, 0, parent); c.rotation.z = -0.15;
+    part(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0.04, 0.4, 0, parent);
+    part(new THREE.SphereGeometry(0.133, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.45), new THREE.MeshStandardMaterial({ color: 0x3b2a1c, roughness: 0.9 }), 0, 0.01, -0.01, parent);
+  } else if (st.hat === 'hair') {
+    part(new THREE.SphereGeometry(0.135, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), mt.hat, 0, 0.01, -0.01, parent).scale.set(1.04, 1.05, 1.08);
+  } else if (st.hat === 'helmet') {
+    part(new THREE.SphereGeometry(0.155, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), mt.hat, 0, 0.02, -0.01, parent);
+    part(new THREE.BoxGeometry(0.2, 0.02, 0.1), mt.hat, 0, 0.04, 0.16, parent);
+  } else if (st.hat === 'santa') {
+    const c = part(new THREE.ConeGeometry(0.14, 0.34, 14), mt.hat, 0, 0.24, -0.03, parent); c.rotation.x = -0.5;
+    part(new THREE.TorusGeometry(0.13, 0.035, 8, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.08, 0, parent).rotation.x = Math.PI / 2;
+    part(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.36, -0.18, parent);
+  } else if (st.hat === 'astro') {
+    const glassy = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.3, clearcoat: 1 });
+    part(new THREE.SphereGeometry(0.21, 20, 14), glassy, 0, 0.0, 0, parent);
+    part(new THREE.SphereGeometry(0.17, 18, 12, -0.9, 1.8, 0.9, 1.1), new THREE.MeshStandardMaterial({ color: 0xd4a843, metalness: 1, roughness: 0.15 }), 0, 0.0, 0.06, parent);
   } else if (st.hat === 'curlers') {
     // a perm in progress: hair plus a row of rollers
     part(new THREE.SphereGeometry(0.14, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), mt.hat, 0, 0.0, -0.01, parent).scale.set(1.05, 1.1, 1.08);
@@ -2961,11 +4102,13 @@ function makePerson(key) {
   part(new THREE.SphereGeometry(0.014, 6, 6), mt.eye, -0.045, 0.03, 0.115, head);
   part(new THREE.SphereGeometry(0.014, 6, 6), mt.eye, 0.045, 0.03, 0.115, head);
   addHat(head, st, mt, part);
+  if (st.beard) { part(new THREE.SphereGeometry(0.12, 12, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), 0, -0.1, 0.07, head).scale.set(1, 1.2, 0.8); }
+  if (st.collar) part(new THREE.BoxGeometry(0.06, 0.03, 0.02), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.66, 0.135, torso);
   const arms = [];
   for (const s of [-1, 1]) {
     const sh = new THREE.Group(); sh.position.set(s * 0.27, 0.6, 0); torso.add(sh);
     part(new THREE.CapsuleGeometry(0.058, 0.2, 4, 8), mt.sleeve, 0, -0.14, 0, sh);
-    if (mt.stripe) part(new THREE.BoxGeometry(0.02, 0.26, 0.02), mt.stripe, s * 0.055, -0.14, 0, sh);
+    if (mt.stripe && st.can) part(new THREE.BoxGeometry(0.02, 0.26, 0.02), mt.stripe, s * 0.055, -0.14, 0, sh);
     const el = new THREE.Group(); el.position.y = -0.3; sh.add(el);
     part(new THREE.CapsuleGeometry(0.05, 0.2, 4, 8), st.vest ? mt.skin : mt.sleeve, 0, -0.13, 0, el);
     part(new THREE.SphereGeometry(0.058, 8, 6), mt.skin, 0, -0.28, 0, el);
@@ -2976,13 +4119,14 @@ function makePerson(key) {
   for (const s of [-1, 1]) {
     const hp = new THREE.Group(); hp.position.set(s * 0.1, -0.05, 0); hips.add(hp);
     part(new THREE.CapsuleGeometry(0.075, 0.3, 4, 8), mt.legs, 0, -0.22, 0, hp);
-    if (mt.stripe) part(new THREE.BoxGeometry(0.02, 0.8, 0.02), mt.stripe, s * 0.075, -0.42, 0, hp);
+    if (mt.stripe && st.can) part(new THREE.BoxGeometry(0.02, 0.8, 0.02), mt.stripe, s * 0.075, -0.42, 0, hp);
     const kn = new THREE.Group(); kn.position.y = -0.43; hp.add(kn);
     part(new THREE.CapsuleGeometry(0.065, 0.3, 4, 8), mt.legs, 0, -0.2, 0, kn);
     part(new RoundedBoxGeometry(0.13, 0.1, 0.25, 2, 0.03), mt.shoe, 0, -0.42, 0.04, kn);
     legs.push({ hp, kn });
   }
   g.userData = { pivot, body, hips, torso, head, arms, legs, key, anim: { phase: Math.random() * 6, z: 2.4, yaw: 0, lastX: 0, lastY: 0 } };
+  if (st.scale) g.scale.setScalar(st.scale);
   return g;
 }
 
@@ -3007,9 +4151,10 @@ function animatePerson(g, p, dt, t) {
   const pz = p.z ?? A.z;
   const moving = Math.hypot(p.x - A.lastX, p.y - A.lastY, pz - (A.lastZ ?? pz)) / Math.max(dt, 1e-4);
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
-  const st = p.state;
+  const riding = p.bike && (p.state === 'appear' || p.state === 'ride' || p.state === 'fly');
+  const st = p.dance ? 'bounce' : p.state === 'zip' ? 'hang' : riding ? 'ride' : p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
-  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared'].includes(st) ? st : p.mode;
+  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
   const groundZ = isDave ? 2.4 : 2.55 + (p.id || 0) * 0.14;
   let x = p.x, y = p.y, zT = groundZ, yawT = p.face > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -3019,6 +4164,8 @@ function animatePerson(g, p, dt, t) {
   if (mode === 'spray') { yawT = Math.PI; zT = Z_IN + 0.32; y = p.y + 0.125; }
   if (mode === 'bounce') { y = p.y + 0.125 + (p.hop || 0) * 0.35; zT = Z_MID; yawT = Math.sin(t * 3) * 0.6; }
   if (mode === 'hang') { zT = Z_OUT + 0.3; yawT = Math.PI; }
+  if (mode === 'haul') { yawT = Math.PI; }
+  if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52; yawT = Math.PI / 2; }
   if (mode === 'rattle') { yawT = Math.PI; zT = Z_OUT + 0.85; x = p.x; }
   A.z += (zT - A.z) * Math.min(1, dt * 8);
   A.yaw += wrapAngle(yawT - A.yaw) * Math.min(1, dt * 10);
@@ -3083,6 +4230,18 @@ function animatePerson(g, p, dt, t) {
     for (const a of u.arms) { a.sh.rotation.x = -3.05; }
     u.legs[0].hp.rotation.x = -0.3 - (p.swing || 0) * 0.5; u.legs[1].hp.rotation.x = -0.1 - (p.swing || 0) * 0.6;
     u.legs[0].kn.rotation.x = 0.5; u.legs[1].kn.rotation.x = 0.3;
+  } else if (mode === 'haul') {
+    const s = Math.sin(t * 5);
+    u.arms[0].sh.rotation.x = -2.6 + s * 0.9; u.arms[1].sh.rotation.x = -2.6 - s * 0.9;
+    u.arms[0].el.rotation.x = -0.3; u.arms[1].el.rotation.x = -0.3;
+    u.torso.rotation.x = -0.15 + Math.abs(s) * 0.1; u.legs[0].hp.rotation.x = 0.3; u.legs[1].hp.rotation.x = -0.25;
+  } else if (mode === 'ride') {
+    const s = (p.state === 'ride' ? t * 12 : 0);
+    u.legs[0].hp.rotation.x = -1.2 + Math.sin(s) * 0.4; u.legs[1].hp.rotation.x = -1.2 - Math.sin(s) * 0.4;
+    u.legs[0].kn.rotation.x = 1.3 + Math.cos(s) * 0.3; u.legs[1].kn.rotation.x = 1.3 - Math.cos(s) * 0.3;
+    for (const a of u.arms) { a.sh.rotation.x = -1.2; a.el.rotation.x = -0.3; }
+    u.torso.rotation.x = 0.35;
+    if (p.state === 'fly') { u.arms[1].sh.rotation.x = -2.9; u.head.rotation.x = -0.3; }
   } else if (mode === 'scared') {
     for (const a of u.arms) { a.sh.rotation.x = -2.7 + Math.sin(t * 30) * 0.1; a.el.rotation.x = -0.4; }
     u.arms[0].sh.rotation.z = 0.5; u.arms[1].sh.rotation.z = -0.5;
@@ -3415,6 +4574,65 @@ function makeItem(key) {
       add(new THREE.CylinderGeometry(0.015, 0.01, 0.4, 5), bronze, -0.82, 0.8, 0, 0, 0, -0.5);
       break;
     }
+    case 'keg': {
+      const alu = new THREE.MeshStandardMaterial({ color: 0xc9ced3, metalness: 0.85, roughness: 0.3 });
+      for (const x of [-0.2, 0.2]) { add(new THREE.CylinderGeometry(0.19, 0.19, 0.58, 18), alu, x, 0.29, 0); for (const y of [0.08, 0.5]) add(new THREE.TorusGeometry(0.19, 0.02, 6, 18), alu, x, y, 0, Math.PI / 2); }
+      add(new THREE.BoxGeometry(0.34, 0.14, 0.01), new THREE.MeshStandardMaterial({ map: labelTex('BEER'), roughness: 0.7 }), 0.2, 0.3, 0.19);
+      break;
+    }
+    case 'speakers': {
+      const blk = new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.6 });
+      for (const x of [-0.25, 0.25]) { add(new RoundedBoxGeometry(0.42, 0.8, 0.4, 2, 0.03), blk, x, 0.4, 0); add(new THREE.CylinderGeometry(0.14, 0.14, 0.02, 20), M.dark, x, 0.3, 0.2, Math.PI / 2); add(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 16), M.dark, x, 0.62, 0.2, Math.PI / 2); }
+      break;
+    }
+    case 'sacks': {
+      const sack = new THREE.MeshStandardMaterial({ color: 0xc8b48a, roughness: 1 });
+      for (let i = 0; i < 3; i++) add(new RoundedBoxGeometry(0.7, 0.2, 0.42, 3, 0.09), sack, (i - 1) * 0.02, 0.1 + i * 0.2, 0, 0, i * 0.2);
+      break;
+    }
+    case 'millstone': {
+      const stone = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 0.95, map: stoneWallTex });
+      add(new THREE.CylinderGeometry(0.55, 0.55, 0.28, 28), stone, 0, 0.14, 0);
+      add(new THREE.CylinderGeometry(0.1, 0.1, 0.3, 12), M.dark, 0, 0.15, 0);
+      break;
+    }
+    case 'rubble': {
+      const bag = new THREE.MeshStandardMaterial({ color: 0x3c3f44, roughness: 0.8 });
+      add(new THREE.SphereGeometry(0.3, 10, 8), bag, 0, 0.25, 0).scale.set(1, 0.8, 0.8);
+      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(0.2, 0.02, 0.14), new THREE.MeshStandardMaterial({ color: 0x4a5058 }), (i - 1.5) * 0.08, 0.48, 0, 0.4, i, 0.3);
+      break;
+    }
+    case 'fireworks': {
+      add(new THREE.BoxGeometry(0.8, 0.4, 0.5), new THREE.MeshStandardMaterial({ color: 0xc7a06a, roughness: 0.9 }), 0, 0.2, 0);
+      for (let i = 0; i < 6; i++) { add(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8), new THREE.MeshStandardMaterial({ color: [0xd8203a, 0x1f6fd1, 0xf3d40b][i % 3] }), -0.25 + i * 0.1, 0.55, 0); add(new THREE.ConeGeometry(0.035, 0.08, 8), M.white, -0.25 + i * 0.1, 0.79, 0); }
+      add(new THREE.BoxGeometry(0.5, 0.16, 0.01), new THREE.MeshStandardMaterial({ map: labelTex('BANG!', '#d8203a', '#ffffff'), roughness: 0.7 }), 0, 0.2, 0.26);
+      break;
+    }
+    case 'bell': {
+      const bronze = new THREE.MeshStandardMaterial({ color: 0x9a6a30, metalness: 0.9, roughness: 0.3 });
+      const pts = []; for (let i = 0; i <= 14; i++) { const t = i / 14; pts.push(new THREE.Vector2(0.18 + 0.36 * Math.pow(t, 1.8) + (t > 0.9 ? 0.05 : 0), 1.0 - t * 0.9)); }
+      add(new THREE.LatheGeometry(pts, 28), bronze, 0, 0, 0);
+      add(new THREE.CylinderGeometry(0.19, 0.19, 0.06, 20), bronze, 0, 1.0, 0);
+      add(new THREE.BoxGeometry(1.1, 0.1, 0.5), M.bark, 0, 1.1, 0);
+      break;
+    }
+    case 'glass': {
+      const pane = new THREE.MeshPhysicalMaterial({ color: 0x9fd3ea, roughness: 0.05, transparent: true, opacity: 0.55, clearcoat: 1 });
+      add(new THREE.BoxGeometry(1.2, 0.08, 0.4), M.bark, 0, 0.04, 0);
+      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(1.1, 0.9, 0.02), pane, 0, 0.53, -0.12 + i * 0.08);
+      break;
+    }
+    case 'kit': {
+      add(new RoundedBoxGeometry(0.4, 0.22, 0.26, 2, 0.04), new THREE.MeshStandardMaterial({ color: 0x1f6fd1, roughness: 0.5 }), 0, 0.11, 0);
+      add(new THREE.BoxGeometry(0.2, 0.08, 0.01), new THREE.MeshStandardMaterial({ map: labelTex('LUNCH'), roughness: 0.7 }), 0, 0.12, 0.135);
+      break;
+    }
+    case 'presents': {
+      const sack = new THREE.MeshStandardMaterial({ color: 0x7a5a36, roughness: 1 });
+      add(new THREE.SphereGeometry(0.32, 12, 10), sack, 0, 0.3, 0).scale.y = 1.1;
+      for (const [x, c] of [[-0.12, 0xd8203a], [0.12, 0x2f9a4a]]) add(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshStandardMaterial({ color: c }), x, 0.62, 0);
+      break;
+    }
   }
   return g;
 }
@@ -3731,13 +4949,14 @@ function monsterView(tr, dt, t) {
   const M = gobbler;
   if (!m || m.state === 'away' || m.state === 'gone') { M.g.visible = false; return; }
   M.g.visible = true;
-  const walking = m.state === 'walk' || m.state === 'leave';
-  M.g.position.set(m.x, m.y, HATCH_Z);
-  M.g.rotation.y = 0.95;                         // three-quarters on, heading right
+  const walking = m.state === 'walk' || m.state === 'leave' || m.state === 'sulk';
+  const shaking = m.state === 'shake';
+  M.g.position.set(m.x + (shaking ? Math.sin(t * 2 * Math.PI * 1.4) * 0.15 : 0), m.y, shaking ? Z_OUT + 0.6 : HATCH_Z);
+  M.g.rotation.y = m.state === 'sulk' ? -0.95 : shaking ? 0.2 : 0.95;   // three-quarters on, heading right
   M.body.position.y = walking ? Math.abs(Math.sin(t * 7)) * 0.08 : 0;
   M.body.rotation.z = walking ? Math.sin(t * 7) * 0.06 : 0;
   const chomping = m.state === 'eat' && m.t < 1.4;
-  M.jaw.rotation.x = chomping ? Math.max(0, Math.sin(m.t * 14)) * 0.9 : m.state === 'emerge' || m.state === 'fall' ? 0.6 : 0.12 + Math.sin(t * 2) * 0.08;
+  M.jaw.rotation.x = chomping ? Math.max(0, Math.sin(m.t * 14)) * 0.9 : m.state === 'emerge' || m.state === 'fall' || shaking ? 0.6 + (shaking ? Math.sin(t * 9) * 0.2 : 0) : 0.12 + Math.sin(t * 2) * 0.08;
   M.body.scale.setScalar(m.state === 'eat' && m.t < 0.7 ? 1 + Math.sin(m.t * 4.5) * 0.15 : 1);
   M.eyes.forEach((e, i) => { e.rotation.z = Math.sin(t * 2.3 + i * 1.7) * 0.35; e.rotation.x = Math.cos(t * 1.9 + i) * 0.25; });
   M.legs.forEach(({ lg }, i) => { lg.rotation.x = walking ? Math.sin(t * 10 + i * 1.3) * 0.5 : Math.sin(t * 3 + i) * 0.1; });
@@ -3787,6 +5006,153 @@ function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p
 function resetPolice() {
   police.active = false; police.done = false; police.queue = []; police.state = 'idle';
   policeCar.visible = false; officer.visible = false;
+}
+
+// ---------------------------------------------------------------------------
+//  Special jobs: the people who come up for them, and their props
+// ---------------------------------------------------------------------------
+const visitorMeshes = new Map();
+function visitorMesh(v) {
+  let m = visitorMeshes.get(v.id);
+  if (!m || m.userData.key !== v.style) { if (m) root.remove(m); m = makePerson(v.style); root.add(m); visitorMeshes.set(v.id, m); }
+  return m;
+}
+function hideVisitors() { for (const m of visitorMeshes.values()) m.visible = false; }
+const unitCyl = new THREE.CylinderGeometry(1, 1, 1, 6);
+const ropeMat = new THREE.MeshStandardMaterial({ color: 0xc8b48a, roughness: 0.9 });
+const cableMat = new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.7, roughness: 0.35 });
+const segPool = [];
+let segI = 0;
+function seg(mat, r, ax, ay, az, bx, by, bz) {
+  let m = segPool[segI++];
+  if (!m) { m = new THREE.Mesh(unitCyl, mat); root.add(m); segPool.push(m); }
+  m.material = mat;
+  const dx = bx - ax, dy = by - ay, dz = bz - az, L = Math.hypot(dx, dy, dz) || 1e-3;
+  m.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+  m.scale.set(r, L, r);
+  m.quaternion.setFromUnitVectors(UP, _v.set(dx / L, dy / L, dz / L));
+  m.visible = true;
+}
+function makeBike() {
+  const g = new THREE.Group();
+  const frameM = new THREE.MeshStandardMaterial({ color: 0xff2d8a, metalness: 0.5, roughness: 0.35 });
+  const tyre = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.8 });
+  for (const x of [-0.42, 0.42]) { const w = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.04, 8, 20), tyre); w.position.set(x, 0.29, 0); g.add(w); }
+  const bar = (ax, ay, bx, by) => { const m = new THREE.Mesh(unitCyl, frameM); const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy); m.position.set((ax + bx) / 2, (ay + by) / 2, 0); m.scale.set(0.025, L, 0.025); m.rotation.z = Math.atan2(-dx, dy); g.add(m); };
+  bar(-0.42, 0.29, 0, 0.3); bar(0, 0.3, 0.3, 0.62); bar(-0.42, 0.29, -0.1, 0.62); bar(-0.1, 0.62, 0.3, 0.62); bar(0.3, 0.62, 0.42, 0.29); bar(0.3, 0.62, 0.28, 0.82);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.1), tyre); seat.position.set(-0.12, 0.66, 0); g.add(seat);
+  const hb = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.5), frameM); hb.position.set(0.28, 0.83, 0); g.add(hb);
+  g.visible = false; root.add(g);
+  return g;
+}
+const bike = makeBike();
+function makeSleigh() {
+  const g = new THREE.Group();
+  const red = new THREE.MeshPhysicalMaterial({ color: 0xb3121f, roughness: 0.35, clearcoat: 0.8 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xd4a843, metalness: 0.9, roughness: 0.3 });
+  const body = new THREE.Mesh(new RoundedBoxGeometry(1.6, 0.6, 0.9, 3, 0.12), red); body.position.y = 0.55; body.castShadow = true; g.add(body);
+  const back = new THREE.Mesh(new RoundedBoxGeometry(0.25, 0.7, 0.9, 3, 0.1), red); back.position.set(-0.75, 0.95, 0); g.add(back);
+  for (const z of [-0.4, 0.4]) { const r = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.05, 0.06), gold); r.position.set(0.05, 0.08, z); g.add(r); const tip = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.03, 6, 10, Math.PI), gold); tip.position.set(1.0, 0.24, z); tip.rotation.z = -Math.PI / 2; g.add(tip); for (const x of [-0.5, 0.4]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.05), gold); st.position.set(x, 0.22, z); g.add(st); } }
+  const sack = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 10), new THREE.MeshStandardMaterial({ color: 0x7a5a36, roughness: 1 })); sack.position.set(-0.35, 1.0, 0); sack.scale.y = 1.2; g.add(sack);
+  const santa = makePerson('santa'); santa.position.set(0.2, 0.45, 0); santa.rotation.y = Math.PI / 2; g.add(santa);
+  const su = santa.userData; for (const l of su.legs) l.hp.rotation.x = -1.4; su.arms[0].sh.rotation.x = -1.2; su.arms[1].sh.rotation.x = -1.2;
+  // reindeer: plain brown deer with antlers, flying in pairs ahead of the sleigh
+  const deerM = new THREE.MeshStandardMaterial({ color: 0x7a4e2d, roughness: 0.9 });
+  const antM = new THREE.MeshStandardMaterial({ color: 0xd9c7a0, roughness: 0.8 });
+  const deer = [];
+  for (let i = 0; i < 4; i++) {
+    const d = new THREE.Group(); d.position.set(1.9 + Math.floor(i / 2) * 1.3, 0.9, i % 2 ? 0.35 : -0.35); g.add(d);
+    const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.55, 4, 10), deerM); b.rotation.z = Math.PI / 2; b.position.y = 0.55; d.add(b);
+    const neck = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.3, 4, 8), deerM); neck.position.set(0.38, 0.75, 0); neck.rotation.z = -0.6; d.add(neck);
+    const head = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.16, 4, 8), deerM); head.position.set(0.5, 0.9, 0); head.rotation.z = Math.PI / 2 - 0.3; d.add(head);
+    for (const z of [-0.06, 0.06]) { const a = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, 0.28, 5), antM); a.position.set(0.45, 1.1, z); a.rotation.z = 0.35; a.rotation.x = z * 5; d.add(a); }
+    const legs = [];
+    for (const [x, z] of [[-0.25, -0.08], [-0.25, 0.08], [0.25, -0.08], [0.25, 0.08]]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.45, 5), deerM); l.position.set(x, 0.3, z); d.add(l); legs.push(l); }
+    deer.push({ d, legs });
+  }
+  const rein = new THREE.Mesh(unitCyl, gold); rein.scale.set(0.01, 3.3, 0.01); rein.rotation.z = Math.PI / 2 + 0.1; rein.position.set(1.7, 1.0, 0); g.add(rein);
+  g.visible = false; root.add(g);
+  return { g, santa, deer };
+}
+const sleigh = makeSleigh();
+// falling snow
+const snowFlakes = [];
+{
+  const sm = new THREE.SpriteMaterial({ map: softTex, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
+  for (let i = 0; i < 260; i++) { const s = new THREE.Sprite(sm); s.scale.setScalar(0.07 + Math.random() * 0.08); s.visible = false; root.add(s); snowFlakes.push({ s, x: Math.random(), y: Math.random(), z: Math.random(), v: 0.4 + Math.random() * 0.6 }); }
+}
+function snowView(L, dt, t) {
+  const on = !!(L && L.snow);
+  for (const f of snowFlakes) {
+    f.s.visible = on;
+    if (!on) continue;
+    f.y -= f.v * dt * 0.08; if (f.y < 0) { f.y = 1; f.x = Math.random(); }
+    f.s.position.set(-6 + f.x * (L.W + 12) + Math.sin(t * 0.7 + f.z * 9) * 0.3, f.y * (L.H + 6), -1 + f.z * 8);
+  }
+}
+function eventView(tr, L, dt, t) {
+  segI = 0;
+  const E = L.event, ev = tr && tr.ev, sim = tr && tr.sim;
+  if (tr) for (const v of tr.visitors) {
+    const m = visitorMesh(v);
+    if (!v.visible || v.state === 'gone' || v.bikeOnly) { m.visible = false; continue; }
+    animatePerson(m, v, dt, t);
+  }
+  bike.visible = false; sleigh.g.visible = false;
+  if (tr && E && ev) {
+    if (E.type === 'hoist' && sim.nodes[ev.node]) {
+      const n = sim.nodes[ev.node];
+      if (eventPieces.wheel) eventPieces.wheel.position.set(n.x, n.y + 0.18, Z_OUT + 0.15);
+      const it = ev.item;
+      if (it && it.hanging) {
+        seg(ropeMat, 0.012, n.x + 0.12, n.y + 0.18, Z_OUT + 0.15, it.x, it.y + 0.75, Z_MID);
+        seg(ropeMat, 0.012, n.x - 0.12, n.y + 0.18, Z_OUT + 0.15, dave.position.x, dave.position.y + 1.9, dave.position.z);
+      }
+    }
+    if (E.type === 'zip' && ev.to && sim.nodes[ev.node]) {
+      const n = sim.nodes[ev.node], z = Z_OUT + 0.3, to = ev.to;
+      const riding = tr.visitors.find(v => v.state === 'zip');
+      const hx = riding ? riding.x : null, hy = riding ? riding.y + 2.05 : null;
+      if (riding) { seg(cableMat, 0.012, n.x, n.y + 0.2, z, hx, hy, z); seg(cableMat, 0.012, hx, hy, z, to.x, to.y + 2.2, -2.4); }
+      else seg(cableMat, 0.012, n.x, n.y + 0.2, z, to.x, to.y + 2.2, -2.4);
+      if (eventPieces.cable) eventPieces.cable.visible = false;
+    }
+    if (E.type === 'chute' && ev.node >= 0 && sim.nodes[ev.node]) {
+      const n = sim.nodes[ev.node];
+      if (eventPieces.chute) {
+        eventPieces.chute.position.set(n.x - eventPieces.chute.userData.x, n.y - eventPieces.chute.userData.y, 0);
+      }
+    }
+    if (E.type === 'bmx' && ev.r && ev.r.visible && ev.r.state !== 'flat' && ev.r.state !== 'gone') {
+      const r = ev.r;
+      bike.visible = true;
+      bike.position.set(r.x, r.y, Z_MID);
+      bike.rotation.set(0, 0, r.state === 'fly' ? Math.max(-0.5, Math.min(0.35, (r.vy || 0) * 0.08)) : 0);
+    }
+    if (E.type === 'sleigh' && ev.s && ev.s.state !== 'gone') {
+      const s = ev.s;
+      sleigh.g.visible = true;
+      sleigh.g.position.set(s.x, s.y + 0.1, Z_MID);
+      sleigh.g.rotation.z = s.state === 'fly' ? -0.08 : s.state === 'takeoff' ? 0.15 : s.state === 'crash' ? Math.min(1.2, (ev.st || 0) * 1.5) : 0;
+      sleigh.santa.visible = !(s.state === 'parked' && ev.st > 1 && ev.st < 6);
+      const flying = s.state === 'fly' || s.state === 'takeoff';
+      sleigh.deer.forEach((d, i) => { d.d.position.y = (flying ? 0.9 : 0.3) + Math.sin(t * 6 + i) * 0.05; for (const [k, l] of d.legs.entries()) l.rotation.z = flying ? Math.sin(t * 9 + k * 1.6 + i) * 0.5 : 0; });
+    }
+    if (E.type === 'launch' && rocketParts.g) {
+      rocketParts.g.position.y = ev.rocketY || 0;
+      const lit = ev.stage === 'lift' || ev.stage === 'done';
+      rocketParts.flame.visible = lit && ev.stage === 'lift';
+      if (rocketParts.flame.visible) { rocketParts.flame.scale.set(1 + Math.sin(t * 40) * 0.08, 1 + Math.sin(t * 31) * 0.15, 1); if (Math.random() < 0.6) puff(L.house.x0 + 1.1 + (Math.random() - 0.5) * 3, 0.3, -1 + Math.random() * 2, 3, 1.4, 0xd8d4cc); }
+    }
+  }
+  for (let i = segI; i < segPool.length; i++) segPool[i].visible = false;
+}
+function resetEventView() {
+  hideVisitors(); bike.visible = false; sleigh.g.visible = false;
+  for (const m of segPool) m.visible = false;
+  if (rocketParts.g) { rocketParts.g.position.y = 0; rocketParts.flame.visible = false; }
+  if (eventPieces.cable) eventPieces.cable.visible = true;
+  if (eventPieces.chute) eventPieces.chute.position.set(0, 0, 0);
 }
 
 // ============================================================================
@@ -3851,6 +5217,7 @@ const sfx = (() => {
     growl() { tone(70, 1.1, { type: 'sawtooth', gain: 0.22, slide: 45, attack: 0.08 }); tone(104, 0.9, { type: 'square', gain: 0.06, slide: 60, attack: 0.1 }); noise(1.0, { gain: 0.25, freq: 380, q: 2, type: 'bandpass', sweep: 180 }); },
     chomp() { for (let i = 0; i < 3; i++) { noise(0.08, { gain: 0.5, freq: 900, type: 'bandpass', when: i * 0.22 }); tone(160, 0.12, { type: 'square', gain: 0.12, slide: 70, when: i * 0.22 }); } tone(90, 0.5, { type: 'sine', gain: 0.35, slide: 40, when: 0.75 }); },
     portal() { tone(220, 1.6, { type: 'sine', gain: 0.12, slide: 1400, attack: 0.3 }); tone(330, 1.6, { type: 'triangle', gain: 0.06, slide: 2100, attack: 0.3 }); noise(1.6, { gain: 0.2, type: 'bandpass', freq: 300, q: 3, sweep: 5000 }); },
+    kick() { tone(120, 0.18, { type: 'sine', gain: 0.45, slide: 45 }); noise(0.03, { gain: 0.15, type: 'highpass', freq: 2500 }); },
     glass() { noise(0.25, { gain: 0.35, type: 'highpass', freq: 4000 }); for (let i = 0; i < 6; i++) tone(2500 + Math.random() * 3000, 0.25, { gain: 0.05, when: Math.random() * 0.2 }); },
     splat() { noise(0.2, { gain: 0.5, freq: 700 }); tone(90, 0.25, { type: 'sine', gain: 0.4, slide: 40 }); tone(420, 0.12, { type: 'square', gain: 0.05, slide: 150, when: 0.05 }); },
     siren() { for (let i = 0; i < 6; i++) { tone(960, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9, attack: 0.05 }); tone(720, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9 + 0.45, attack: 0.05 }); } },
@@ -3958,7 +5325,7 @@ function buildOverlay(L) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(f.x1 - f.x0 - 0.08, f.y1 - f.y0 - 0.08, Z_OUT - Z_IN), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, opacity: 0.8 }));
     m.position.set((f.x0 + f.x1) / 2, (f.y0 + f.y1) / 2, Z_MID);
     overlay.add(m);
-    addLabel('keep', f.kind === 'porch' ? 'Porch · keep clear' : 'Doorway · keep clear', (f.x0 + f.x1) / 2, f.y1 - 0.4, Z_OUT);
+    addLabel('keep', f.kind === 'porch' ? 'Porch · keep clear' : f.kind === 'buttress' ? 'Flying buttress · keep clear' : 'Doorway · keep clear', (f.x0 + f.x1) / 2, f.y1 - 0.4, Z_OUT);
   }
   for (const [a, b] of L.noBase) {
     const t = hatchTex.clone(); t.needsUpdate = true; t.repeat.set((b - a + 0.9) * 2, 2);
@@ -3997,6 +5364,7 @@ const save = (() => {
 const unlocked = (i) => i === 0 || (save.d.stars[LEVELS[i - 1].id] || 0) > 0 || (save.d.stars[LEVELS[i].id] || 0) > 0;
 
 const $ = (id) => document.getElementById(id);
+const glz = () => (S.L && S.L.glazier) || GLAZIER;
 const fmt = (n) => '£' + Math.round(n).toLocaleString('en-GB');
 const kg = (m) => m >= 1000 ? (m / 1000).toFixed(m % 1000 ? 1 : 0) + ' t' : m + ' kg';
 
@@ -4014,6 +5382,9 @@ const ICON = {
   lock: '<svg viewBox="0 0 34 34"><path d="M11 3v28M23 3v28" stroke="#dfe4e8" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="15" width="18" height="15" rx="1.5" fill="#f3d40b"/><path d="M8 20l6-5M8 27l12-12M14 30l12-10" stroke="#161b21" stroke-width="2"/><rect x="21" y="9" width="7" height="6" rx="1" fill="#d4a843"/><path d="M22.5 9V7a2 2 0 0 1 4 0v2" stroke="#d4a843" stroke-width="1.6" fill="none"/></svg>',
   trap: '<svg viewBox="0 0 34 34"><rect x="3" y="12" width="28" height="10" rx="1" fill="#c99a58"/><path d="M3 15h28M3 18.5h28" stroke="#8a6230" stroke-width=".8"/><path d="M15 12l3 4-3 2 4 4" stroke="#d7312a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   hatch: '<svg viewBox="0 0 34 34"><rect x="3" y="10" width="28" height="18" rx="1" fill="#1a0f22"/><rect x="3" y="4" width="28" height="9" rx="1" fill="#a8743f" transform="skewX(-12) translate(3 0)"/><circle cx="12" cy="22" r="2.6" fill="#fff27a"/><circle cx="12.5" cy="22.3" r="1.1" fill="#111"/><circle cx="20" cy="21" r="2.2" fill="#fff27a"/><circle cx="20.4" cy="21.3" r="0.9" fill="#111"/></svg>',
+  wheel: '<svg viewBox="0 0 34 34"><circle cx="17" cy="12" r="7" fill="none" stroke="#dfe4e8" stroke-width="3"/><path d="M17 5v14M10 12h14" stroke="#dfe4e8" stroke-width="1.4"/><path d="M11 13v16M23 13v10" stroke="#c8b48a" stroke-width="2"/><rect x="18" y="23" width="10" height="7" rx="1" fill="#b6b2a8"/></svg>',
+  zip: '<svg viewBox="0 0 34 34"><rect x="3" y="6" width="7" height="7" fill="#ff7a1a"/><path d="M8 9 L31 24" stroke="#dfe4e8" stroke-width="2"/><circle cx="20" cy="17" r="2.5" fill="#f3d40b"/><path d="M20 19v7M17 22h6" stroke="#f3d40b" stroke-width="2"/></svg>',
+  chute: '<svg viewBox="0 0 34 34"><path d="M8 4h8l-2 8h-5zM9 12h6l-2 8h-5zM10 20h6l-2 8h-5z" fill="#ff7a1a"/><rect x="16" y="24" width="15" height="7" rx="1" fill="#f0b90b"/></svg>',
   protect: '<svg viewBox="0 0 34 34"><rect x="6" y="5" width="22" height="24" fill="#2a3440" stroke="#f6f5f0" stroke-width="2"/><rect x="4" y="8" width="26" height="18" rx="1" fill="#d9b27a" transform="rotate(-8 17 17)"/><g fill="#6b4e2e"><circle cx="8" cy="12" r="1.2"/><circle cx="27" cy="9" r="1.2"/><circle cx="8" cy="26" r="1.2"/><circle cx="28" cy="23" r="1.2"/></g></svg>',
   order: '<svg viewBox="0 0 34 34"><circle cx="9" cy="9" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="9" y="12.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">1</text><circle cx="25" cy="25" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="25" y="28.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">2</text><path d="M13 13l8 8" stroke="#f3d40b" stroke-width="2.2" stroke-linecap="round"/><path d="M21 16v5h-5" stroke="#f3d40b" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
 };
@@ -4025,8 +5396,11 @@ const TOOLS = [
   { id: 'ladder', name: 'Ladder', price: `£${LADDER.cost}/m · up to ${LADDER.maxLen} m`, key: '5' },
   { id: 'lock', name: 'Ladder lock', price: `£${LOCK.cost} · keeps chavs off`, key: '6', req: 'chavs' },
   { id: 'trap', name: 'Trap board', price: `£${BOARDS.trap.cost}/m · gives way under anyone`, key: 't', req: 'chavs' },
-  { id: 'hatch', name: 'Trap door', price: `£${HATCH.cost} · for the Drain Gobbler`, key: 'h', req: 'monster' },
-  { id: 'protect', name: 'Board up', price: `£${BOARDUP.cost} a window · glazier £${GLAZIER}`, key: '0' },
+  { id: 'hatch', name: 'Trap door', price: `£${HATCH.cost} · for the Drain Gobbler`, key: 'h', req: 'toolHatch' },
+  { id: 'wheel', name: 'Gin wheel', price: '£45 · haul loads up on a rope', key: 'g', req: 'toolWheel' },
+  { id: 'zip', name: 'Zip anchor', price: '£60 · where the wire starts', key: 'z', req: 'toolZip' },
+  { id: 'chute', name: 'Rubble chute', price: '£40 · hangs off a board end', key: 'c', req: 'toolChute' },
+  { id: 'protect', name: 'Board up', price: `£${BOARDUP.cost} a window · glazier £${glz()}`, key: '0' },
   { id: 'tie', name: 'Wall tie', price: `£${TIE.cost} each`, key: '7' },
   { id: 'order', name: 'Build order', price: 'Click pieces in order', key: '8' },
   { id: 'erase', name: 'Remove', price: 'Full refund', key: '9' },
@@ -4036,7 +5410,7 @@ function renderTools() {
   const el = $('tools');
   el.innerHTML = TOOLS.map(t => {
     const dis = (t.req && !L[t.req]) || (t.id === 'tie' && L.maxTies === 0);
-    const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : t.id === 'hatch' ? 'Nothing in the drains here' : 'Later jobs') : t.price;
+    const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : t.id === 'hatch' ? (L.monster === 'hide' ? 'No digging here' : 'Nothing in the drains here') : ['wheel', 'zip', 'chute'].includes(t.id) ? 'Not on this job' : 'Later jobs') : t.price;
     return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
   }).join('') + `<hr><div class="mini"><button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button><button id="clearBtn" title="Remove everything">Clear</button></div><div class="mini"><button id="orderBtn" class="${S.showOrder ? 'on' : ''}" title="List the order the crew puts pieces up, and change it">Order list</button></div>`;
   el.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setTool(b.dataset.tool); }));
@@ -4079,6 +5453,18 @@ const TERRY = [
   "Pianos. Up. Cheap. In that order.",
   "It's windy up there. That's the chimney's problem, not mine.",
   "An elephant? On a scaffold? As long as it doesn't fall down, it's fine.",
+  "Rope, wheel, bit of tube. The Egyptians managed without a crane.",
+  "My party, my scaffold, my rules. Rule one: it stays up.",
+  "Can't dig in a churchyard. Can climb, though. Dave's quick when he's scared.",
+  "The Bishop's car is not in the budget. Neither is a new Bishop.",
+  "One zip wire, three riders. The vicar's heavier than he looks.",
+  "Tyler's mum signed the form. I've got the form. We're fine.",
+  "Stained glass is three hundred quid a pane. Plywood is thirty-five. Do the maths.",
+  "He's got a lot of houses to do tonight. Make it quick and make it long.",
+  "Nine hundred kilos of bronze. Ding dong.",
+  "Twelve metres, glass everywhere, and wind like a train. Welcome to London.",
+  "Twelve guests, nine metres up. If it wobbles, tell the DJ to slow it down.",
+  "It's a rocket. How hard can it be? Don't answer that.",
 ];
 function windowAt(pt) {
   const ws = S.L.house.windows || [];
@@ -4144,11 +5530,14 @@ function updateHelp() {
     tie: '<b>Click</b> a joint next to solid wall (blue dots) to tie it in. Ties stop sway but carry no weight.',
     ladder: '<b>Click</b> the foot (ground or a boarded platform), then the top. The top must land on boards. Dave only climbs ladders.',
     trap: `<b>Click or drag</b> along a tube to lay a fake board. It looks real but gives way under anyone. A chav who drops ${SAFE_FALL} m or less lies there dazed and the police pay ${fmt(TRAP_REWARD)} for them. Any higher and you get sued. Dave avoids trap boards if there's another way up.`,
-    protect: `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${GLAZIER} glazier). Windows marked ⚠ are in the firing line.`,
+    protect: `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${glz()} glazier). Windows marked ⚠ are in the firing line.`,
     hatch: `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
+    wheel: '<b>Click</b> a joint at platform height or above to fit the gin wheel. The rope must hang clear to the ground, so put it on an arm sticking out past the scaffold. Loads are swung onto the nearest board within 1.5 m.',
+    zip: '<b>Click</b> a joint at platform level, next to a board, to anchor the zip wire. The wire runs to the pub and pulls that joint sideways, hard.',
+    chute: '<b>Click</b> a joint at the end of the platform boards to hang the rubble chute. It drops straight down, so it has to be over the skip.',
     lock: '<b>Click</b> any ladder to lock it. Chavs can\'t climb locked ladders, and Dave has the key.',
     order: '<b>Click pieces in the order you want them put up</b>, starting from #1. Anything you don\'t click keeps its place after. Use the order list to fine-tune.',
-    erase: '<b>Click</b> a tube, board, ladder, lock, tie or trap door to remove it.',
+    erase: '<b>Click</b> any piece to remove it.',
   }[S.tool];
   $('help').innerHTML = h + '<br><b>Drag empty space</b> to pan · <b>right-drag</b> to orbit · <b>wheel</b> to zoom · <b>Ctrl+Z</b> undo';
 }
@@ -4177,6 +5566,7 @@ function afterEdit() {
   save.write();
   syncBoardUps(L, S.pieces);
   syncHatches(L, S.pieces);
+  syncEventPieces(L, S.pieces);
   refreshRiskLabels();
   refreshDocket();
   refreshOrderLabels();
@@ -4189,7 +5579,7 @@ function refreshRiskLabels() {
   for (const i of S.risk || []) {
     if (prot.has(i)) continue;
     const w = S.L.house.windows[i];
-    addLabel('risk', `⚠ Glass at risk · £${GLAZIER}`, w.x + w.w / 2, w.y + w.h / 2, 0.2, 'risk');
+    addLabel('risk', `⚠ Glass at risk · £${glz()}`, w.x + w.w / 2, w.y + w.h / 2, 0.2, 'risk');
   }
 }
 function refreshOrderLabels() {
@@ -4252,8 +5642,10 @@ function refreshDocket() {
   const traps = S.pieces.filter(p => p.type === 'trap').length;
   if (L.chavs) items.push(['info', chavsUp ? `${Math.max(1, unlocked)} ladder${unlocked > 1 ? 's' : ''} unlocked: chavs can get up${traps ? ` · ${traps} trap board${traps > 1 ? 's' : ''} waiting` : ''}` : groundLadders.length ? 'Ladders locked: chavs stay on the ground' : 'No ladders yet: chavs stay on the ground']);
   const unprot = [...(S.risk || [])].filter(i => !S.pieces.some(p => p.type === 'protect' && p.a[0] === i)).length;
-  if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? 'Windows in the firing line boarded' : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${GLAZIER} each if smashed`]);
-  if (L.monster) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
+  if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? 'Windows in the firing line boarded' : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${glz()} each if smashed`]);
+  for (const [ok, t] of req.event || []) items.push([ok, t]);
+  if (L.monster === 'hide') items.push(['info', "Churchyard: no trap doors. Dave will climb up and pull his ladder up. The Gobbler will shake the scaffold"]);
+  if (L.toolHatch) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
   items.push([frac <= 1, frac <= 1 ? `Under the quote by ${fmt(L.budget - cost)}` : `Over the quote by ${fmt(cost - L.budget)}`]);
   $('checks').innerHTML = items.map(([ok, t]) => `<li class="${ok === 'info' ? 'info' : ok ? 'ok' : ''}">${t}</li>`).join('');
   const b = $('buildBtn');
@@ -4315,6 +5707,7 @@ function pieceAt(pt) {
     if (p.type === 'tie') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.12;
     else if (p.type === 'protect') { const w = S.L.house.windows[p.a[0]]; d = w ? Math.hypot(pt.x - w.x - w.w / 2, pt.y - w.y - w.h / 2) - 0.45 : 9; }
     else if (p.type === 'lock') d = Math.hypot(pt.x - p.a[0] - LAD_OFF, pt.y - p.a[1] - 0.75) - 0.35;
+    else if (p.type === 'wheel' || p.type === 'zip' || p.type === 'chute') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.2;
     else if (p.type === 'hatch') d = pt.y < p.a[1] + 0.8 ? Math.abs(pt.x - p.a[0]) - 0.45 : 9;
     else if (p.type === 'ladder') d = segDist(pt.x, pt.y, p.a[0] + LAD_OFF, p.a[1], p.b[0] + LAD_OFF, p.b[1] + 1) - 0.1;
     else if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') d = segDist(pt.x, pt.y, p.a[0] + 0.1, p.a[1] + 0.14, p.b[0] - 0.1, p.b[1] + 0.14) - 0.05;
@@ -4521,6 +5914,9 @@ window.addEventListener('pointerup', (ev) => {
   } else if (tool === 'protect' && moved < 8) {
     const i = windowAt(pt);
     if (i >= 0) tryPlace({ type: 'protect', a: [i, 0] }); else toast('Click a window to board it up');
+  } else if ((tool === 'wheel' || tool === 'zip' || tool === 'chute') && moved < 8) {
+    const n = nearestNode(pt);
+    if (n) tryPlace({ type: tool, a: n });
   } else if (tool === 'tie' && moved < 8) {
     const n = nearestNode(pt);
     if (n) tryPlace({ type: 'tie', a: n });
@@ -4579,6 +5975,14 @@ function updateDesignHover() {
       previewMat.color.set(err ? 0xff4d3a : 0x5cff8a);
       if (err) setTip(err, true, seg.a[0] + 0.5, seg.a[1]);
       else setTip(`${BOARDS[tool].name} · ${fmt(BOARDS[tool].cost)} · holds ${BOARDS[tool].cap} kg`, false, seg.a[0] + 0.5, seg.a[1]);
+    }
+  } else if (tool === 'wheel' || tool === 'zip' || tool === 'chute') {
+    const n = nearestNode(pt);
+    if (n) {
+      const err = validatePlacement(S.L, S.pieces, { type: tool, a: n });
+      hoverRing.visible = true; hoverRing.position.set(n[0], n[1], Z_OUT + 0.02); hoverRing.material.color.set(err ? 0xff4d3a : 0xff7a1a);
+      const name = { wheel: 'Gin wheel · £45', zip: 'Zip wire anchor · £60', chute: 'Rubble chute · £40' }[tool];
+      setTip(err || name, !!err, n[0], n[1]);
     }
   } else if (tool === 'tie') {
     const n = nearestNode(pt);
@@ -4704,6 +6108,9 @@ function openBrief() {
   const facts = [`<span class="chip">Quote ${fmt(L.budget)}</span>`];
   if (L.chavs) facts.push(`<span class="chip bad">Chavs: ${L.chavs}</span>`);
   if (L.monster) facts.push('<span class="chip bad">Something in the drains</span>');
+  if (L.night) facts.push('<span class="chip">Night job</span>');
+  if (L.snow) facts.push('<span class="chip">Snow</span>');
+  if (L.glazier) facts.push(`<span class="chip warn">Glass £${L.glazier} a pane</span>`);
   if (L.wind) facts.push(`<span class="chip warn">Wind: ${L.wind + L.gust > 35 ? 'strong gusts' : 'breezy'}</span>`);
   if (L.maxTies === 0) facts.push('<span class="chip bad">No wall ties</span>'); else if (L.maxTies < 99) facts.push(`<span class="chip">Max ${L.maxTies} wall ties</span>`);
   if (L.heavy) facts.push('<span class="chip">Heavy tube unlocked</span>');
@@ -4716,7 +6123,7 @@ function openBrief() {
     <div class="loads"><span class="h">Dave will carry up</span><span class="h" style="text-align:right">Weight</span><span class="h" style="text-align:right">Height</span>${loads}</div>
     <div class="facts">${facts.join('')}${best ? `<span class="chip">Your best ${fmt(best)}</span>` : ''}</div>
     <p class="tipline">${L.tip}</p>
-    ${S.risk && S.risk.size ? `<p class="tipline">Anything over ${WINDOW_BREAK_KG} kg dumped in front of a window puts a brick through it: £${GLAZIER} to the glazier, or £${BOARDUP.cost} to board it up first. ${S.risk.size} window${S.risk.size > 1 ? 's are' : ' is'} in the firing line on this job.</p>` : ''}
+    ${S.risk && S.risk.size ? `<p class="tipline">Anything over ${WINDOW_BREAK_KG} kg dumped in front of a window puts a brick through it: £${glz()} to the glazier, or £${BOARDUP.cost} to board it up first. ${S.risk.size} window${S.risk.size > 1 ? 's are' : ' is'} in the firing line on this job.</p>` : ''}
     ${L.chavs ? `<p class="tipline chav">After Dave's done, ${L.chavs > 1 ? L.chavs + ' local lads' : 'a local lad'} will turn up to swing on your tubes and climb any ladder that isn't locked. Every tag on the house costs ${fmt(TAG_COST)} to clean off. You don't have to lock them out: lay <b>trap boards</b> where they'll walk. A chav who drops ${SAFE_FALL} m or less gets carted off by the police, who pay ${fmt(TRAP_REWARD)} each. Drop one further than that and you get sued.</p>` : ''}
     ${L.monster ? `<p class="tipline chav">There's something living in the drains round here. After dark the <b>Drain Gobbler</b> crawls out of the manhole and goes looking for Dave. Dig a <b>trap door</b> (${fmt(HATCH.cost)}) in the pavement and it drops into the secret basement and gets sent back to the Underneath. No trap door and it eats Dave, and the agency charges ${fmt(NEW_BUILDER)} to send Jeff.</p>` : ''}
     <p class="terry"><b>Big Terry:</b> “${TERRY[L.id - 1]}”</p>
@@ -4746,7 +6153,7 @@ function enterDesign() {
   clearPeopleFx();
   resetPolice();
   resetSheila();
-  resetMonsterView(); kevin.visible = false;
+  resetMonsterView(); kevin.visible = false; resetEventView(); resetFireworks();
   if (sceneDirty) { const hl = labels.filter(l => l.group === 'design'); buildLevelScene(S.L); }
   S.dusk = 0;
   afterEdit();
@@ -4794,7 +6201,7 @@ function startTest() {
   clearPeopleFx();
   resetPolice();
   resetSheila();
-  resetMonsterView(); kevin.visible = false;
+  resetMonsterView(); kevin.visible = false; resetEventView(); resetFireworks();
   S.chain = null;
   hoverRing.visible = startRing.visible = previewTube.visible = previewBoard.visible = false;
   tipLabel.visible = false;
@@ -4823,6 +6230,21 @@ $('soundBtn').onclick = () => { sfx.toggle(); syncSoundBtn(); };
 syncSoundBtn();
 $('playBtn').onclick = () => { sfx.unlock(); sfx.clank(1); show('title', false); S.titleSim = null; for (const m of chavMeshes) m.visible = false; openSelect(); };
 
+function eventStatus(tr) {
+  const ev = tr.ev, E = S.L.event, V = tr.visitors;
+  const up = V.filter(v => v.state === 'act').length;
+  switch (E.type) {
+    case 'hoist': return ['Hoisting', { walk: 'Dave is hooking on the next load', lift: `Hauling up the ${ev.item ? ev.item.def.name.toLowerCase() : 'load'}`, swing: 'Swinging it in', rest: 'Landed', home: 'All up', done: 'All up' }[ev.stage] || ''];
+    case 'party': return ['Party', ev.partyT < 0 ? `Guests arriving: ${up} of ${E.guests} up` : ev.partyT <= E.dur ? `Dancing! ${Math.max(0, E.dur - ev.partyT).toFixed(0)} s to go` : 'Everyone going home'];
+    case 'zip': { const r = V.find(v => v.state === 'zip'); const c = V.find(v => v.state !== 'gone' && v.state !== 'wait'); return ['Zip wire', r ? `${r.name} is on the wire!` : c ? `${c.name} is climbing up` : 'All across']; }
+    case 'chute': return ['Stripping the roof', `Bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length}${ev.stage === 'fall' ? ': down it goes' : ''}`];
+    case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', splash: 'SPLASH!' }[r.state] || '']; }
+    case 'sleigh': { const st = ev.s.state; return ['Christmas Eve', { fly: 'Sleigh on approach…', slide: 'Touchdown! Braking…', parked: 'Parked. Presents going down the chimney', takeoff: 'And away!' }[st] || '']; }
+    case 'fireworks': return ['Bonfire Night', ev.lit ? (ev.fired < E.rockets ? `Rocket ${ev.fired} of ${E.rockets}` : 'Grand finale done') : 'Terry is climbing up with a lighter'];
+    case 'launch': return ['Launch', ev.stage === 'climb' ? 'The astronaut is climbing up' : ev.stage === 'count' ? `T minus ${ev.n}` : ev.stage === 'lift' ? 'LIFT-OFF!' : 'Clear of the tower'];
+  }
+  return ['', ''];
+}
 function status(ph, msg, bad = false) {
   $('statusPh').textContent = ph;
   $('statusPh').style.color = bad ? '#ff8a7a' : '';
@@ -4834,8 +6256,14 @@ function testStatus() {
   const b = tr.builder;
   const it = b.carrying ? `${b.carrying.def.name.toLowerCase()} (${kg(b.carrying.def.mass)})` : '';
   if (tr.result && !tr.result.ok) return status(tr.result.sued ? 'Sued' : 'Collapse', tr.result.reason, true);
+  if (tr.phase === 'event' && tr.ev) return status(...eventStatus(tr));
   if (tr.phase === 'monster' && tr.monster) {
     const st = tr.monster.state;
+    if (S.L.monster === 'hide') {
+      const f = b.flee;
+      const m2 = { emerge: "Something's crawling out of the drain…", walk: f === 'safe' ? "Dave's up and he's pulled the ladder up after him" : f === 'climb' ? 'Dave is legging it up the scaffold!' : 'Dave is running for the ladder!', shake: "It's shaking the scaffold! Hold on, Dave", sulk: "It's given up. Back to the drains", sink: 'Gone. For now.', eat: "It's eaten Dave!", leave: `The agency's sending Jeff (${fmt(NEW_BUILDER)})` }[st] || '';
+      return status('Midnight', m2, st === 'eat' || st === 'shake');
+    }
     const msg = { emerge: "Something's crawling out of the drain…", walk: "The Drain Gobbler's heading for Dave!", fall: 'TRAPPED! Down into the secret basement it goes', gone: 'Sent back to the Underneath. Good riddance.', eat: "It's eaten Dave!", leave: `The agency's sending Jeff (${fmt(NEW_BUILDER)})` }[st] || '';
     return status('Midnight', msg, st === 'eat');
   }
@@ -4875,7 +6303,10 @@ function showResult() {
   const trappedN = (tr.result && tr.result.trapped) || 0;
   const reward = (tr.result && tr.result.ok) ? trappedN * TRAP_REWARD : 0;
   const eaten = !!(tr.result && tr.result.ok && tr.result.eaten);
-  const cost = materials + tags * TAG_COST + smashed * GLAZIER + (eaten ? NEW_BUILDER : 0) - reward;
+  const charges = (tr.result && tr.result.ok) ? tr.charges : [];
+  const chargeTotal = charges.reduce((a, c) => a + c.cost, 0);
+  const chargeLines = {}; for (const c of charges) chargeLines[c.what] = (chargeLines[c.what] || 0) + c.cost;
+  const cost = materials + tags * TAG_COST + smashed * glz() + (eaten ? NEW_BUILDER : 0) + chargeTotal - reward;
   const stood = tr.result && tr.result.ok && !tr.unfinished;
   const unfinished = tr.result && tr.result.ok && tr.unfinished;
   const sued = tr.result && tr.result.sued;
@@ -4890,7 +6321,7 @@ function showResult() {
     sfx.fanfare();
   } else sfx.wah();
   const next = S.li + 1 < LEVELS.length;
-  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed || eaten) && materials <= L.budget ? `It stood, but ${[smashed && `the glazier (${fmt(smashed * GLAZIER)})`, tags && `the graffiti clean-up (${fmt(tags * TAG_COST)})`, eaten && `hiring Jeff after Dave got eaten (${fmt(NEW_BUILDER)})`].filter(Boolean).join(' and ')} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
+  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed || eaten || chargeTotal) && materials <= L.budget ? `It stood, but ${[smashed && `the glazier (${fmt(smashed * glz())})`, tags && `the graffiti clean-up (${fmt(tags * TAG_COST)})`, eaten && `hiring Jeff after Dave got eaten (${fmt(NEW_BUILDER)})`, chargeTotal && Object.entries(chargeLines).map(([k, v]) => `${k.toLowerCase()} (${fmt(v)})`).join(' and ')].filter(Boolean).join(' and ')} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
   const band = ok ? ['Safe for use*', '*as far as Terry knows'] : unfinished ? ['Not finished', 'No platform, no pay'] : sued ? ['Sued', 'See you in court'] : stood ? ['Not paid', 'Over the quote'] : ['Do not use', 'Scaffold incomplete'];
   const kills = trappedN;
   if (kills) { save.d.chavKills = (save.d.chavKills || 0) + kills; save.write(); }
@@ -4901,7 +6332,8 @@ function showResult() {
       <span class="k">Job</span><span class="v">${String(L.id).padStart(2, '0')} · ${L.name}</span>
       <span class="k">Materials</span><span class="v num">${fmt(materials)}</span>
       ${reward ? `<span class="k">Police reward</span><span class="v num bonus">+${fmt(reward)} (${trappedN} chav${trappedN > 1 ? 's' : ''})</span>` : ''}
-      ${smashed ? `<span class="k">Glazier</span><span class="v num">${fmt(smashed * GLAZIER)} (${smashed} window${smashed > 1 ? 's' : ''})</span>` : ''}
+      ${smashed ? `<span class="k">Glazier</span><span class="v num">${fmt(smashed * glz())} (${smashed} window${smashed > 1 ? 's' : ''})</span>` : ''}
+      ${Object.entries(chargeLines).map(([k, v]) => `<span class="k">${k}</span><span class="v num">${fmt(v)}</span>`).join('')}
       ${eaten ? `<span class="k">New builder</span><span class="v num">${fmt(NEW_BUILDER)} (Dave got eaten)</span>` : ''}
       ${tr.result && tr.result.monsterTrapped ? `<span class="k">Drain Gobbler</span><span class="v bonus">Back in the Underneath</span>` : ''}
       ${tags ? `<span class="k">Graffiti</span><span class="v num">${fmt(tags * TAG_COST)} (${tags} tag${tags > 1 ? 's' : ''})</span>` : ''}
@@ -4954,6 +6386,8 @@ function stepTest(dt) {
     if (ev.type === 'tag') { addTagDecal(ev.tag, tagDecals.length); shout('TAGGED!', ev.tag.x, ev.tag.y + 0.6); }
     else if (ev.type === 'splat') { sfx.splat(); }
     else if (ev.type === 'monster') monsterEvent(ev, S.L);
+    else if (ev.type === 'rocket') launchFirework(ev, S.L);
+    else if (ev.type === 'hoist' || ev.type === 'party' || ev.type === 'zip' || ev.type === 'chute' || ev.type === 'bmx' || ev.type === 'sleigh' || ev.type === 'fireworks' || ev.type === 'launch') eventFx(ev, S.L, tr);
     else if (ev.type === 'angry') { shout('OI!! 😡', ev.x, ev.y + 2.2); }
     if (ev.type === 'land') {
       const it = ev.item;
@@ -4968,6 +6402,11 @@ function stepTest(dt) {
       S.shake = Math.max(S.shake, Math.min(0.25, it.def.mass / 4000));
       if (it.def.mass >= 500) shout(it.def.mass >= 1000 ? 'THUMP!!' : 'THUMP!', it.x, it.y + 1.8);
     }
+  }
+  // party: a kick drum on the beat
+  if (tr.ev && tr.ev.type === 'party' && tr.ev.partyT >= 0 && tr.ev.partyT <= S.L.event.dur) {
+    const beatN = Math.floor(tr.ev.beat / (2 * Math.PI));
+    if (beatN !== S.lastBeat) { S.lastBeat = beatN; sfx.kick(); if (beatN % 4 === 0) shout('♪', S.L.W / 2 + (Math.random() - 0.5) * 4, S.L.zones[0].y + 2.3, 'bonus'); }
   }
   // piece placement sounds
   if (tr.phase === 'build' && tr.idx !== S.lastIdx) {
@@ -5042,7 +6481,7 @@ function stepTest(dt) {
     if (!c._sprayed) { c._sprayed = true; sfx.spray(); }
   }
   // dusk falls when the chavs come out
-  const duskT = tr.phase === 'chavs' || tr.phase === 'monster' || (S.L.chavs && (tr.phase === 'hold' || tr.phase === 'done' || tr.phase === 'failing') && tr.deliv >= S.L.deliveries.length) ? 1 : 0;
+  const duskT = tr.phase === 'chavs' || tr.phase === 'monster' || (S.L.night && tr.phase === 'event') || (S.L.chavs && (tr.phase === 'hold' || tr.phase === 'done' || tr.phase === 'failing') && tr.deliv >= S.L.deliveries.length) ? 1 : 0;
   S.dusk = (S.dusk || 0) + (duskT - (S.dusk || 0)) * Math.min(1, dt * S.speed * 0.4);
   if (tr.phase === 'done') {
     S.resultT += dt;
@@ -5051,6 +6490,86 @@ function stepTest(dt) {
   }
   testStatus();
 }
+// ---- special job effects ----
+function eventFx(ev, L, tr) {
+  const zy = L.zones[0].y;
+  const say = (text, x, y, cls = '', life = 1.8) => { const l = shout(text, x, y, cls); l.life = life; return l; };
+  if (ev.type === 'hoist' && ev.what === 'lift') { sfx.clank(0.5); say('HEAVE!', L.W - 1, 2.4); }
+  else if (ev.type === 'party') {
+    if (ev.what === 'music') { say('♪ DROP THE BEAT ♪', L.W / 2, zy + 2.6, 'bonus', 2.5); sfx.fanfare(); }
+    if (ev.what === 'end') say('HAPPY BIRTHDAY TEZ!', L.W / 2, zy + 2.6, 'bonus', 2.5);
+  } else if (ev.type === 'zip') {
+    if (ev.what === 'go') { say(ev.name === 'Sheila' ? 'WHEEEEE!' : ev.name === 'The vicar' ? 'LORD ABOVE!' : 'GERONIMOOO!', L.W, zy + 2.4, '', 2); sfx.snap(); }
+  } else if (ev.type === 'chute') {
+    if (ev.what === 'throw') { sfx.crack(); }
+    if (ev.what === 'skip') { sfx.thud(200); puff(ev.x, 1.2, 2.3, 8, 0.6, 0x7a7266); }
+    if (ev.what === 'car') { sfx.glass(); sfx.thud(200); say("THE BISHOP'S CAR!", ev.x, 2.4, 'sued', 2); puff(ev.x, 1.2, 3.6, 10, 0.7, 0x7a7266); S.shake = Math.max(S.shake, 0.12); }
+    if (ev.what === 'mess') { sfx.thud(150); puff(ev.x, 0.4, Z_MID, 8, 0.6, 0x7a7266); }
+  } else if (ev.type === 'bmx') {
+    if (ev.what === 'appear') say('SEND IT!', ev.x, zy + 2.2);
+    if (ev.what === 'launch') { say('WAHEYYY!', ev.x, zy + 2.2, 'bonus'); sfx.snap(); }
+    if (ev.what === 'splash') { say('SPLOOSH!', ev.x, 2.2, 'bonus', 2.2); for (let i = 0; i < 4; i++) puff(ev.x + (Math.random() - 0.5), 0.5, Z_MID, 6, 0.7, 0x9fe0ff); sfx.splat(); sfx.fanfare(); }
+    if (ev.what === 'crash') { say('OOF!', ev.x, 2, 'sued'); sfx.splat(); }
+  } else if (ev.type === 'sleigh') {
+    if (ev.what === 'bells') { for (let i = 0; i < 8; i++) sfx.clank(0.25); say('♪ jingle jingle ♪', 0, zy + 4, 'bonus', 2.5); }
+    if (ev.what === 'touchdown') { sfx.thud(420); S.shake = Math.max(S.shake, 0.15); say('SKRRRRR', ev.x, zy + 1.8); }
+    if (ev.what === 'santa') { say('HO HO HO!', ev.x, zy + 2.4, 'bonus', 2.5); }
+    if (ev.what === 'crash') { sfx.crash(); say('NOT THE PRESENTS!', ev.x, zy + 2, 'sued', 2.5); }
+    if (ev.what === 'takeoff') say('MERRY CHRISTMAS!', L.W / 2, zy + 3, 'bonus', 2.5);
+  } else if (ev.type === 'fireworks') {
+    if (ev.what === 'lit') { say('STAND BACK!', L.event.launchX, zy + 2.2); }
+  } else if (ev.type === 'launch') {
+    if (ev.what === 'count') { const l = say(String(ev.n), L.house.x0 + 4, zy + 3, ev.n <= 3 ? 'sued' : 'bonus', 0.9); sfx.click(); }
+    if (ev.what === 'ignition') { say('IGNITION', L.house.x0 + 4, zy + 3, 'sued', 2); sfx.crash(); sfx.wind(200); S.shake = 0.35; }
+    if (ev.what === 'away') { say('WE HAVE LIFT-OFF', L.house.x0 + 4, zy + 3, 'bonus', 2.5); sfx.wind(0); }
+    if (ev.what === 'aboard') say('Hatch closed', L.house.x1 + 0.5, zy + 2);
+  }
+}
+// fireworks: rockets streak up and burst; the odd one goes for a window
+const fwRockets = [], fwSparks = [];
+const fwMat = (c) => new THREE.SpriteMaterial({ map: softTex, color: c, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+function launchFirework(ev, L) {
+  const s = new THREE.Sprite(fwMat(0xfff2c0)); s.scale.setScalar(0.25); root.add(s);
+  const r = { s, x: ev.x, y: ev.y, t: 0, rogue: ev.rogue };
+  if (ev.rogue >= 0) { const w = L.house.windows[ev.rogue]; r.tx = w.x + w.w / 2; r.ty = w.y + w.h / 2; r.vx = (r.tx - r.x) / 0.8; r.vy = (r.ty - r.y) / 0.8; }
+  else { r.vx = (Math.random() - 0.5) * 2.5; r.vy = 6.5 + Math.random() * 1.8; }
+  fwRockets.push(r);
+  sfx.noiseWhoosh ? sfx.noiseWhoosh() : sfx.snap();
+}
+function fireworksView(dt) {
+  for (let i = fwRockets.length - 1; i >= 0; i--) {
+    const r = fwRockets[i];
+    r.t += dt;
+    if (r.rogue < 0) r.vy -= 6 * dt;
+    r.x += r.vx * dt; r.y += r.vy * dt;
+    r.s.position.set(r.x, r.y, r.rogue >= 0 ? 0.6 : Z_MID + 1);
+    if (Math.random() < 0.8) puff(r.x, r.y - 0.1, r.rogue >= 0 ? 0.7 : Z_MID + 1, 1, 0.18, 0xffd08a);
+    const done = r.rogue >= 0 ? r.t > 0.8 : (r.vy < 2 || r.t > 1.8);
+    if (!done) continue;
+    root.remove(r.s); fwRockets.splice(i, 1);
+    if (r.rogue >= 0) {
+      const b = windowBreakable(r.rogue);
+      if (b && !b.glassBroken && !b.protected && smashGlass(b)) { S.windows++; shout('SMASH!', r.tx, r.ty); }
+      else { shout('THUNK', r.tx, r.ty); sfx.thunk(); }
+      continue;
+    }
+    const col = [0xff3b5c, 0x3bff8a, 0x3bb4ff, 0xffd12d, 0xd04bff, 0xffffff][Math.floor(Math.random() * 6)];
+    const m = fwMat(col);
+    for (let k = 0; k < 40; k++) {
+      const a = Math.random() * Math.PI * 2, e = (Math.random() - 0.5) * Math.PI, sp = 3 + Math.random() * 2;
+      const sp2 = new THREE.Sprite(m); sp2.scale.setScalar(0.22); root.add(sp2);
+      fwSparks.push({ s: sp2, x: r.x, y: r.y, z: Z_MID + 1, vx: Math.cos(a) * Math.cos(e) * sp, vy: Math.sin(e) * sp, vz: Math.sin(a) * Math.cos(e) * sp, t: 0 });
+    }
+    sfx.crack(); sfx.snap();
+  }
+  for (let i = fwSparks.length - 1; i >= 0; i--) {
+    const f = fwSparks[i];
+    f.t += dt; f.vy -= 2.5 * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt;
+    f.s.position.set(f.x, f.y, f.z); f.s.material.opacity = Math.max(0, 1 - f.t / 1.6);
+    if (f.t > 1.6) { root.remove(f.s); fwSparks.splice(i, 1); }
+  }
+}
+function resetFireworks() { for (const r of fwRockets) root.remove(r.s); fwRockets.length = 0; for (const f of fwSparks) root.remove(f.s); fwSparks.length = 0; }
 function shout(text, x, y, cls = '', z = Z_OUT + 0.5) {
   const l = addLabel('shout ' + cls, text, x, y, z, 'fx');
   l.born = S.t;
@@ -5112,6 +6631,7 @@ function renderTrial(dt) {
   if (agency) dave.visible = false; else kevin.visible = false;
   animatePerson(agency ? kevin : dave, tr.builder, dt, S.t);
   monsterView(tr, dt, S.t);
+  eventView(tr, S.L, dt, S.t);
   tr.chavs.forEach((c, i) => { if (!c.nicked) animatePerson(chavMesh(i), c, dt, S.t); });
   for (let i = tr.chavs.length; i < chavMeshes.length; i++) chavMeshes[i].visible = false;
   // wind noise + visuals
@@ -5269,9 +6789,14 @@ function frameBody(now) {
   updateGhosts(dt, S.t);
   updatePolice(dt, S.t);
   hatchView(dt);
+  snowView(S.L, dt, S.t);
+  fireworksView(dt);
   updateSheila(dt, S.t, S.mode === 'test' && S.trial ? { x: dave.position.x, y: dave.position.y, visible: dave.visible } : null);
   for (const d of tagDecals) { d.t += dt; d.m.material.opacity = Math.min(1, d.t / 0.6); }
-  const dk = S.mode === 'test' ? (S.dusk || 0) : 0;
+  let dk = S.mode === 'test' ? (S.dusk || 0) : 0;
+  if (S.L && S.L.night) dk = Math.max(dk, S.mode === 'test' ? 0.9 : 0.6);
+  nightSky.visible = !!(S.L && S.L.night) && S.mode !== 'title';
+  scene.fog.color.setHex(nightSky.visible ? 0x141a2a : 0xbfd3e3);
   sun.intensity = 3.3 - 2.0 * dk; sun.color.copy(SUN_DAY).lerp(SUN_DUSK, dk);
   hemi.intensity = 0.38 - 0.18 * dk; renderer.toneMappingExposure = 0.92 - 0.22 * dk;
   updateParticles(dt, windNow, S.L);

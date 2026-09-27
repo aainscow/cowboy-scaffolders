@@ -147,6 +147,13 @@ class ScaffoldView {
     }
     // ladders: aluminium, leaning on the outer frame, running 1 m past the landing
     for (const l of sim.ladders || []) {
+      if (l.pulled) {
+        // pulled up and laid on the platform
+        const top = nodes[l.top], len = (l.len || 3) + 1, y = top.y + 0.2, x1 = top.x + 0.3, x0 = x1 - len;
+        for (const dz of [-0.2, 0.2]) this.alu.push(segMatrix(x0, y, Z_MID + dz, x1, y, Z_MID + dz, 1.25), COL.alu);
+        for (let x = x0 + 0.25; x < x1 - 0.05; x += 0.28) this.alu.push(segMatrix(x, y, Z_MID - 0.2, x, y, Z_MID + 0.2, 0.8), COL.alu);
+        continue;
+      }
       const F = sim.ladderFoot(l), top = nodes[l.top];
       let dx = top.x - F.x, dy = top.y - F.y;
       const len0 = Math.hypot(dx, dy) || 1; dx /= len0; dy /= len0;
@@ -182,6 +189,17 @@ const STYLES = {
   police: { top: 0xc8f000, vest: true, glow: 0x88aa00, sleeve: 0x1b2233, legs: 0x1b2233, shoe: 0x111111, hat: 'police', hatCol: 0x141c2e, skin: 0xe8b996 },
   sheila: { top: 0xf2a7c3, sleeve: 0xf2a7c3, legs: 0xf6dfe6, shoe: 0xff8fbf, hat: 'curlers', hatCol: 0x9a6a44, skin: 0xf0c4a4, gown: 0xf2a7c3, trim: 0xfff4f7 },
   agency: { top: 0xf3d40b, vest: true, glow: 0x886600, sleeve: 0x55595e, legs: 0x3b5a85, shoe: 0x2a2a2a, hat: 'hard', hatCol: 0x2a6bd6, skin: 0xc98e6a },
+  guest0: { top: 0xe0408a, sleeve: 0xe0408a, legs: 0x2b3f6b, shoe: 0x222222, hat: 'party', hatCol: 0xf3d40b, skin: 0xe7b48f, stripe: 0xffffff },
+  guest1: { top: 0x2dbf8a, sleeve: 0x2dbf8a, legs: 0x2a2d33, shoe: 0xf6f6f6, hat: 'party', hatCol: 0xd8203a, skin: 0x8d5a3b, stripe: 0x1a6f4f },
+  guest2: { top: 0xf3d40b, sleeve: 0xf3d40b, legs: 0x3b5a85, shoe: 0x5a3a22, hat: 'hair', hatCol: 0x3b2a1c, skin: 0xf2c9a8, stripe: 0xb8950a },
+  guest3: { top: 0x7a2fa0, sleeve: 0x7a2fa0, legs: 0x1b1d20, shoe: 0x222222, hat: 'party', hatCol: 0x1f6fd1, skin: 0xc98e6a, stripe: 0xffffff },
+  guest4: { top: 0xff7a1a, sleeve: 0xff7a1a, legs: 0x3b5a85, shoe: 0xf6f6f6, hat: 'hair', hatCol: 0x111111, skin: 0x6b4128, stripe: 0xffffff },
+  guest5: { top: 0xf4f2ec, sleeve: 0xf4f2ec, legs: 0x2b3f6b, shoe: 0x3a2a1c, hat: 'party', hatCol: 0x2f9a4a, skin: 0xefc3a0, stripe: 0xd8203a },
+  terry: { top: 0xf3d40b, vest: true, glow: 0x886600, sleeve: 0xf4f2ec, legs: 0x2a2d33, shoe: 0x3a2a1c, hat: 'hard', hatCol: 0xf6f6f2, skin: 0xd99c7d, scale: 1.12 },
+  vicar: { top: 0x15171a, sleeve: 0x15171a, legs: 0x15171a, shoe: 0x111111, hat: 'hair', hatCol: 0xb8b8b8, skin: 0xefc3a0, stripe: 0x15171a, collar: true },
+  tyler: { top: 0x19a974, sleeve: 0x19a974, legs: 0x2b3f6b, shoe: 0xf6f6f6, hat: 'helmet', hatCol: 0xd8203a, skin: 0xe0a987, stripe: 0xffffff, scale: 0.82 },
+  santa: { top: 0xc8102e, sleeve: 0xc8102e, legs: 0xc8102e, shoe: 0x111111, hat: 'santa', hatCol: 0xc8102e, skin: 0xf0c4a4, stripe: 0xffffff, beard: true },
+  astro: { top: 0xeeeeee, sleeve: 0xeeeeee, legs: 0xeeeeee, shoe: 0xaaaaaa, hat: 'astro', hatCol: 0xffffff, skin: 0xe0a987, stripe: 0x1f3b73 },
   chav3: { top: 0x161616, sleeve: 0x161616, legs: 0x161616, shoe: 0xf6f6f6, hat: 'cap', hatCol: 0xb0122a, skin: 0xd79e7a, stripe: 0xffffff, can: 0xffd12d },
 };
 const personMats = {};
@@ -203,6 +221,23 @@ function addHat(parent, st, mt, part) {
     const h = part(new THREE.SphereGeometry(0.14, 16, 12), mt.hat, 0, 0.12, 0, parent); h.scale.set(1, 1.55, 1.05);
     part(new THREE.CylinderGeometry(0.15, 0.15, 0.03, 16), mt.hat, 0, 0.04, 0, parent);
     part(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshStandardMaterial({ color: 0xdfe4e8, metalness: 0.9, roughness: 0.2 }), 0, 0.17, 0.13, parent);
+  } else if (st.hat === 'party') {
+    const c = part(new THREE.ConeGeometry(0.09, 0.3, 12), mt.hat, 0.02, 0.24, 0, parent); c.rotation.z = -0.15;
+    part(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0.04, 0.4, 0, parent);
+    part(new THREE.SphereGeometry(0.133, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.45), new THREE.MeshStandardMaterial({ color: 0x3b2a1c, roughness: 0.9 }), 0, 0.01, -0.01, parent);
+  } else if (st.hat === 'hair') {
+    part(new THREE.SphereGeometry(0.135, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), mt.hat, 0, 0.01, -0.01, parent).scale.set(1.04, 1.05, 1.08);
+  } else if (st.hat === 'helmet') {
+    part(new THREE.SphereGeometry(0.155, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), mt.hat, 0, 0.02, -0.01, parent);
+    part(new THREE.BoxGeometry(0.2, 0.02, 0.1), mt.hat, 0, 0.04, 0.16, parent);
+  } else if (st.hat === 'santa') {
+    const c = part(new THREE.ConeGeometry(0.14, 0.34, 14), mt.hat, 0, 0.24, -0.03, parent); c.rotation.x = -0.5;
+    part(new THREE.TorusGeometry(0.13, 0.035, 8, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.08, 0, parent).rotation.x = Math.PI / 2;
+    part(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.36, -0.18, parent);
+  } else if (st.hat === 'astro') {
+    const glassy = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.3, clearcoat: 1 });
+    part(new THREE.SphereGeometry(0.21, 20, 14), glassy, 0, 0.0, 0, parent);
+    part(new THREE.SphereGeometry(0.17, 18, 12, -0.9, 1.8, 0.9, 1.1), new THREE.MeshStandardMaterial({ color: 0xd4a843, metalness: 1, roughness: 0.15 }), 0, 0.0, 0.06, parent);
   } else if (st.hat === 'curlers') {
     // a perm in progress: hair plus a row of rollers
     part(new THREE.SphereGeometry(0.14, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), mt.hat, 0, 0.0, -0.01, parent).scale.set(1.05, 1.1, 1.08);
@@ -253,11 +288,13 @@ function makePerson(key) {
   part(new THREE.SphereGeometry(0.014, 6, 6), mt.eye, -0.045, 0.03, 0.115, head);
   part(new THREE.SphereGeometry(0.014, 6, 6), mt.eye, 0.045, 0.03, 0.115, head);
   addHat(head, st, mt, part);
+  if (st.beard) { part(new THREE.SphereGeometry(0.12, 12, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }), 0, -0.1, 0.07, head).scale.set(1, 1.2, 0.8); }
+  if (st.collar) part(new THREE.BoxGeometry(0.06, 0.03, 0.02), new THREE.MeshStandardMaterial({ color: 0xffffff }), 0, 0.66, 0.135, torso);
   const arms = [];
   for (const s of [-1, 1]) {
     const sh = new THREE.Group(); sh.position.set(s * 0.27, 0.6, 0); torso.add(sh);
     part(new THREE.CapsuleGeometry(0.058, 0.2, 4, 8), mt.sleeve, 0, -0.14, 0, sh);
-    if (mt.stripe) part(new THREE.BoxGeometry(0.02, 0.26, 0.02), mt.stripe, s * 0.055, -0.14, 0, sh);
+    if (mt.stripe && st.can) part(new THREE.BoxGeometry(0.02, 0.26, 0.02), mt.stripe, s * 0.055, -0.14, 0, sh);
     const el = new THREE.Group(); el.position.y = -0.3; sh.add(el);
     part(new THREE.CapsuleGeometry(0.05, 0.2, 4, 8), st.vest ? mt.skin : mt.sleeve, 0, -0.13, 0, el);
     part(new THREE.SphereGeometry(0.058, 8, 6), mt.skin, 0, -0.28, 0, el);
@@ -268,13 +305,14 @@ function makePerson(key) {
   for (const s of [-1, 1]) {
     const hp = new THREE.Group(); hp.position.set(s * 0.1, -0.05, 0); hips.add(hp);
     part(new THREE.CapsuleGeometry(0.075, 0.3, 4, 8), mt.legs, 0, -0.22, 0, hp);
-    if (mt.stripe) part(new THREE.BoxGeometry(0.02, 0.8, 0.02), mt.stripe, s * 0.075, -0.42, 0, hp);
+    if (mt.stripe && st.can) part(new THREE.BoxGeometry(0.02, 0.8, 0.02), mt.stripe, s * 0.075, -0.42, 0, hp);
     const kn = new THREE.Group(); kn.position.y = -0.43; hp.add(kn);
     part(new THREE.CapsuleGeometry(0.065, 0.3, 4, 8), mt.legs, 0, -0.2, 0, kn);
     part(new RoundedBoxGeometry(0.13, 0.1, 0.25, 2, 0.03), mt.shoe, 0, -0.42, 0.04, kn);
     legs.push({ hp, kn });
   }
   g.userData = { pivot, body, hips, torso, head, arms, legs, key, anim: { phase: Math.random() * 6, z: 2.4, yaw: 0, lastX: 0, lastY: 0 } };
+  if (st.scale) g.scale.setScalar(st.scale);
   return g;
 }
 
@@ -299,9 +337,10 @@ function animatePerson(g, p, dt, t) {
   const pz = p.z ?? A.z;
   const moving = Math.hypot(p.x - A.lastX, p.y - A.lastY, pz - (A.lastZ ?? pz)) / Math.max(dt, 1e-4);
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
-  const st = p.state;
+  const riding = p.bike && (p.state === 'appear' || p.state === 'ride' || p.state === 'fly');
+  const st = p.dance ? 'bounce' : p.state === 'zip' ? 'hang' : riding ? 'ride' : p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
-  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared'].includes(st) ? st : p.mode;
+  const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
   const groundZ = isDave ? 2.4 : 2.55 + (p.id || 0) * 0.14;
   let x = p.x, y = p.y, zT = groundZ, yawT = p.face > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -311,6 +350,8 @@ function animatePerson(g, p, dt, t) {
   if (mode === 'spray') { yawT = Math.PI; zT = Z_IN + 0.32; y = p.y + 0.125; }
   if (mode === 'bounce') { y = p.y + 0.125 + (p.hop || 0) * 0.35; zT = Z_MID; yawT = Math.sin(t * 3) * 0.6; }
   if (mode === 'hang') { zT = Z_OUT + 0.3; yawT = Math.PI; }
+  if (mode === 'haul') { yawT = Math.PI; }
+  if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52; yawT = Math.PI / 2; }
   if (mode === 'rattle') { yawT = Math.PI; zT = Z_OUT + 0.85; x = p.x; }
   A.z += (zT - A.z) * Math.min(1, dt * 8);
   A.yaw += wrapAngle(yawT - A.yaw) * Math.min(1, dt * 10);
@@ -375,6 +416,18 @@ function animatePerson(g, p, dt, t) {
     for (const a of u.arms) { a.sh.rotation.x = -3.05; }
     u.legs[0].hp.rotation.x = -0.3 - (p.swing || 0) * 0.5; u.legs[1].hp.rotation.x = -0.1 - (p.swing || 0) * 0.6;
     u.legs[0].kn.rotation.x = 0.5; u.legs[1].kn.rotation.x = 0.3;
+  } else if (mode === 'haul') {
+    const s = Math.sin(t * 5);
+    u.arms[0].sh.rotation.x = -2.6 + s * 0.9; u.arms[1].sh.rotation.x = -2.6 - s * 0.9;
+    u.arms[0].el.rotation.x = -0.3; u.arms[1].el.rotation.x = -0.3;
+    u.torso.rotation.x = -0.15 + Math.abs(s) * 0.1; u.legs[0].hp.rotation.x = 0.3; u.legs[1].hp.rotation.x = -0.25;
+  } else if (mode === 'ride') {
+    const s = (p.state === 'ride' ? t * 12 : 0);
+    u.legs[0].hp.rotation.x = -1.2 + Math.sin(s) * 0.4; u.legs[1].hp.rotation.x = -1.2 - Math.sin(s) * 0.4;
+    u.legs[0].kn.rotation.x = 1.3 + Math.cos(s) * 0.3; u.legs[1].kn.rotation.x = 1.3 - Math.cos(s) * 0.3;
+    for (const a of u.arms) { a.sh.rotation.x = -1.2; a.el.rotation.x = -0.3; }
+    u.torso.rotation.x = 0.35;
+    if (p.state === 'fly') { u.arms[1].sh.rotation.x = -2.9; u.head.rotation.x = -0.3; }
   } else if (mode === 'scared') {
     for (const a of u.arms) { a.sh.rotation.x = -2.7 + Math.sin(t * 30) * 0.1; a.el.rotation.x = -0.4; }
     u.arms[0].sh.rotation.z = 0.5; u.arms[1].sh.rotation.z = -0.5;
@@ -707,6 +760,65 @@ function makeItem(key) {
       add(new THREE.CylinderGeometry(0.015, 0.01, 0.4, 5), bronze, -0.82, 0.8, 0, 0, 0, -0.5);
       break;
     }
+    case 'keg': {
+      const alu = new THREE.MeshStandardMaterial({ color: 0xc9ced3, metalness: 0.85, roughness: 0.3 });
+      for (const x of [-0.2, 0.2]) { add(new THREE.CylinderGeometry(0.19, 0.19, 0.58, 18), alu, x, 0.29, 0); for (const y of [0.08, 0.5]) add(new THREE.TorusGeometry(0.19, 0.02, 6, 18), alu, x, y, 0, Math.PI / 2); }
+      add(new THREE.BoxGeometry(0.34, 0.14, 0.01), new THREE.MeshStandardMaterial({ map: labelTex('BEER'), roughness: 0.7 }), 0.2, 0.3, 0.19);
+      break;
+    }
+    case 'speakers': {
+      const blk = new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.6 });
+      for (const x of [-0.25, 0.25]) { add(new RoundedBoxGeometry(0.42, 0.8, 0.4, 2, 0.03), blk, x, 0.4, 0); add(new THREE.CylinderGeometry(0.14, 0.14, 0.02, 20), M.dark, x, 0.3, 0.2, Math.PI / 2); add(new THREE.CylinderGeometry(0.06, 0.06, 0.02, 16), M.dark, x, 0.62, 0.2, Math.PI / 2); }
+      break;
+    }
+    case 'sacks': {
+      const sack = new THREE.MeshStandardMaterial({ color: 0xc8b48a, roughness: 1 });
+      for (let i = 0; i < 3; i++) add(new RoundedBoxGeometry(0.7, 0.2, 0.42, 3, 0.09), sack, (i - 1) * 0.02, 0.1 + i * 0.2, 0, 0, i * 0.2);
+      break;
+    }
+    case 'millstone': {
+      const stone = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 0.95, map: stoneWallTex });
+      add(new THREE.CylinderGeometry(0.55, 0.55, 0.28, 28), stone, 0, 0.14, 0);
+      add(new THREE.CylinderGeometry(0.1, 0.1, 0.3, 12), M.dark, 0, 0.15, 0);
+      break;
+    }
+    case 'rubble': {
+      const bag = new THREE.MeshStandardMaterial({ color: 0x3c3f44, roughness: 0.8 });
+      add(new THREE.SphereGeometry(0.3, 10, 8), bag, 0, 0.25, 0).scale.set(1, 0.8, 0.8);
+      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(0.2, 0.02, 0.14), new THREE.MeshStandardMaterial({ color: 0x4a5058 }), (i - 1.5) * 0.08, 0.48, 0, 0.4, i, 0.3);
+      break;
+    }
+    case 'fireworks': {
+      add(new THREE.BoxGeometry(0.8, 0.4, 0.5), new THREE.MeshStandardMaterial({ color: 0xc7a06a, roughness: 0.9 }), 0, 0.2, 0);
+      for (let i = 0; i < 6; i++) { add(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8), new THREE.MeshStandardMaterial({ color: [0xd8203a, 0x1f6fd1, 0xf3d40b][i % 3] }), -0.25 + i * 0.1, 0.55, 0); add(new THREE.ConeGeometry(0.035, 0.08, 8), M.white, -0.25 + i * 0.1, 0.79, 0); }
+      add(new THREE.BoxGeometry(0.5, 0.16, 0.01), new THREE.MeshStandardMaterial({ map: labelTex('BANG!', '#d8203a', '#ffffff'), roughness: 0.7 }), 0, 0.2, 0.26);
+      break;
+    }
+    case 'bell': {
+      const bronze = new THREE.MeshStandardMaterial({ color: 0x9a6a30, metalness: 0.9, roughness: 0.3 });
+      const pts = []; for (let i = 0; i <= 14; i++) { const t = i / 14; pts.push(new THREE.Vector2(0.18 + 0.36 * Math.pow(t, 1.8) + (t > 0.9 ? 0.05 : 0), 1.0 - t * 0.9)); }
+      add(new THREE.LatheGeometry(pts, 28), bronze, 0, 0, 0);
+      add(new THREE.CylinderGeometry(0.19, 0.19, 0.06, 20), bronze, 0, 1.0, 0);
+      add(new THREE.BoxGeometry(1.1, 0.1, 0.5), M.bark, 0, 1.1, 0);
+      break;
+    }
+    case 'glass': {
+      const pane = new THREE.MeshPhysicalMaterial({ color: 0x9fd3ea, roughness: 0.05, transparent: true, opacity: 0.55, clearcoat: 1 });
+      add(new THREE.BoxGeometry(1.2, 0.08, 0.4), M.bark, 0, 0.04, 0);
+      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(1.1, 0.9, 0.02), pane, 0, 0.53, -0.12 + i * 0.08);
+      break;
+    }
+    case 'kit': {
+      add(new RoundedBoxGeometry(0.4, 0.22, 0.26, 2, 0.04), new THREE.MeshStandardMaterial({ color: 0x1f6fd1, roughness: 0.5 }), 0, 0.11, 0);
+      add(new THREE.BoxGeometry(0.2, 0.08, 0.01), new THREE.MeshStandardMaterial({ map: labelTex('LUNCH'), roughness: 0.7 }), 0, 0.12, 0.135);
+      break;
+    }
+    case 'presents': {
+      const sack = new THREE.MeshStandardMaterial({ color: 0x7a5a36, roughness: 1 });
+      add(new THREE.SphereGeometry(0.32, 12, 10), sack, 0, 0.3, 0).scale.y = 1.1;
+      for (const [x, c] of [[-0.12, 0xd8203a], [0.12, 0x2f9a4a]]) add(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshStandardMaterial({ color: c }), x, 0.62, 0);
+      break;
+    }
   }
   return g;
 }
@@ -1023,13 +1135,14 @@ function monsterView(tr, dt, t) {
   const M = gobbler;
   if (!m || m.state === 'away' || m.state === 'gone') { M.g.visible = false; return; }
   M.g.visible = true;
-  const walking = m.state === 'walk' || m.state === 'leave';
-  M.g.position.set(m.x, m.y, HATCH_Z);
-  M.g.rotation.y = 0.95;                         // three-quarters on, heading right
+  const walking = m.state === 'walk' || m.state === 'leave' || m.state === 'sulk';
+  const shaking = m.state === 'shake';
+  M.g.position.set(m.x + (shaking ? Math.sin(t * 2 * Math.PI * 1.4) * 0.15 : 0), m.y, shaking ? Z_OUT + 0.6 : HATCH_Z);
+  M.g.rotation.y = m.state === 'sulk' ? -0.95 : shaking ? 0.2 : 0.95;   // three-quarters on, heading right
   M.body.position.y = walking ? Math.abs(Math.sin(t * 7)) * 0.08 : 0;
   M.body.rotation.z = walking ? Math.sin(t * 7) * 0.06 : 0;
   const chomping = m.state === 'eat' && m.t < 1.4;
-  M.jaw.rotation.x = chomping ? Math.max(0, Math.sin(m.t * 14)) * 0.9 : m.state === 'emerge' || m.state === 'fall' ? 0.6 : 0.12 + Math.sin(t * 2) * 0.08;
+  M.jaw.rotation.x = chomping ? Math.max(0, Math.sin(m.t * 14)) * 0.9 : m.state === 'emerge' || m.state === 'fall' || shaking ? 0.6 + (shaking ? Math.sin(t * 9) * 0.2 : 0) : 0.12 + Math.sin(t * 2) * 0.08;
   M.body.scale.setScalar(m.state === 'eat' && m.t < 0.7 ? 1 + Math.sin(m.t * 4.5) * 0.15 : 1);
   M.eyes.forEach((e, i) => { e.rotation.z = Math.sin(t * 2.3 + i * 1.7) * 0.35; e.rotation.x = Math.cos(t * 1.9 + i) * 0.25; });
   M.legs.forEach(({ lg }, i) => { lg.rotation.x = walking ? Math.sin(t * 10 + i * 1.3) * 0.5 : Math.sin(t * 3 + i) * 0.1; });
@@ -1079,4 +1192,151 @@ function resetSheila() { Object.assign(sheila, { active: false, state: 'idle', p
 function resetPolice() {
   police.active = false; police.done = false; police.queue = []; police.state = 'idle';
   policeCar.visible = false; officer.visible = false;
+}
+
+// ---------------------------------------------------------------------------
+//  Special jobs: the people who come up for them, and their props
+// ---------------------------------------------------------------------------
+const visitorMeshes = new Map();
+function visitorMesh(v) {
+  let m = visitorMeshes.get(v.id);
+  if (!m || m.userData.key !== v.style) { if (m) root.remove(m); m = makePerson(v.style); root.add(m); visitorMeshes.set(v.id, m); }
+  return m;
+}
+function hideVisitors() { for (const m of visitorMeshes.values()) m.visible = false; }
+const unitCyl = new THREE.CylinderGeometry(1, 1, 1, 6);
+const ropeMat = new THREE.MeshStandardMaterial({ color: 0xc8b48a, roughness: 0.9 });
+const cableMat = new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.7, roughness: 0.35 });
+const segPool = [];
+let segI = 0;
+function seg(mat, r, ax, ay, az, bx, by, bz) {
+  let m = segPool[segI++];
+  if (!m) { m = new THREE.Mesh(unitCyl, mat); root.add(m); segPool.push(m); }
+  m.material = mat;
+  const dx = bx - ax, dy = by - ay, dz = bz - az, L = Math.hypot(dx, dy, dz) || 1e-3;
+  m.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+  m.scale.set(r, L, r);
+  m.quaternion.setFromUnitVectors(UP, _v.set(dx / L, dy / L, dz / L));
+  m.visible = true;
+}
+function makeBike() {
+  const g = new THREE.Group();
+  const frameM = new THREE.MeshStandardMaterial({ color: 0xff2d8a, metalness: 0.5, roughness: 0.35 });
+  const tyre = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.8 });
+  for (const x of [-0.42, 0.42]) { const w = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.04, 8, 20), tyre); w.position.set(x, 0.29, 0); g.add(w); }
+  const bar = (ax, ay, bx, by) => { const m = new THREE.Mesh(unitCyl, frameM); const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy); m.position.set((ax + bx) / 2, (ay + by) / 2, 0); m.scale.set(0.025, L, 0.025); m.rotation.z = Math.atan2(-dx, dy); g.add(m); };
+  bar(-0.42, 0.29, 0, 0.3); bar(0, 0.3, 0.3, 0.62); bar(-0.42, 0.29, -0.1, 0.62); bar(-0.1, 0.62, 0.3, 0.62); bar(0.3, 0.62, 0.42, 0.29); bar(0.3, 0.62, 0.28, 0.82);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.1), tyre); seat.position.set(-0.12, 0.66, 0); g.add(seat);
+  const hb = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.5), frameM); hb.position.set(0.28, 0.83, 0); g.add(hb);
+  g.visible = false; root.add(g);
+  return g;
+}
+const bike = makeBike();
+function makeSleigh() {
+  const g = new THREE.Group();
+  const red = new THREE.MeshPhysicalMaterial({ color: 0xb3121f, roughness: 0.35, clearcoat: 0.8 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xd4a843, metalness: 0.9, roughness: 0.3 });
+  const body = new THREE.Mesh(new RoundedBoxGeometry(1.6, 0.6, 0.9, 3, 0.12), red); body.position.y = 0.55; body.castShadow = true; g.add(body);
+  const back = new THREE.Mesh(new RoundedBoxGeometry(0.25, 0.7, 0.9, 3, 0.1), red); back.position.set(-0.75, 0.95, 0); g.add(back);
+  for (const z of [-0.4, 0.4]) { const r = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.05, 0.06), gold); r.position.set(0.05, 0.08, z); g.add(r); const tip = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.03, 6, 10, Math.PI), gold); tip.position.set(1.0, 0.24, z); tip.rotation.z = -Math.PI / 2; g.add(tip); for (const x of [-0.5, 0.4]) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.05), gold); st.position.set(x, 0.22, z); g.add(st); } }
+  const sack = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 10), new THREE.MeshStandardMaterial({ color: 0x7a5a36, roughness: 1 })); sack.position.set(-0.35, 1.0, 0); sack.scale.y = 1.2; g.add(sack);
+  const santa = makePerson('santa'); santa.position.set(0.2, 0.45, 0); santa.rotation.y = Math.PI / 2; g.add(santa);
+  const su = santa.userData; for (const l of su.legs) l.hp.rotation.x = -1.4; su.arms[0].sh.rotation.x = -1.2; su.arms[1].sh.rotation.x = -1.2;
+  // reindeer: plain brown deer with antlers, flying in pairs ahead of the sleigh
+  const deerM = new THREE.MeshStandardMaterial({ color: 0x7a4e2d, roughness: 0.9 });
+  const antM = new THREE.MeshStandardMaterial({ color: 0xd9c7a0, roughness: 0.8 });
+  const deer = [];
+  for (let i = 0; i < 4; i++) {
+    const d = new THREE.Group(); d.position.set(1.9 + Math.floor(i / 2) * 1.3, 0.9, i % 2 ? 0.35 : -0.35); g.add(d);
+    const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.55, 4, 10), deerM); b.rotation.z = Math.PI / 2; b.position.y = 0.55; d.add(b);
+    const neck = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.3, 4, 8), deerM); neck.position.set(0.38, 0.75, 0); neck.rotation.z = -0.6; d.add(neck);
+    const head = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.16, 4, 8), deerM); head.position.set(0.5, 0.9, 0); head.rotation.z = Math.PI / 2 - 0.3; d.add(head);
+    for (const z of [-0.06, 0.06]) { const a = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, 0.28, 5), antM); a.position.set(0.45, 1.1, z); a.rotation.z = 0.35; a.rotation.x = z * 5; d.add(a); }
+    const legs = [];
+    for (const [x, z] of [[-0.25, -0.08], [-0.25, 0.08], [0.25, -0.08], [0.25, 0.08]]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.45, 5), deerM); l.position.set(x, 0.3, z); d.add(l); legs.push(l); }
+    deer.push({ d, legs });
+  }
+  const rein = new THREE.Mesh(unitCyl, gold); rein.scale.set(0.01, 3.3, 0.01); rein.rotation.z = Math.PI / 2 + 0.1; rein.position.set(1.7, 1.0, 0); g.add(rein);
+  g.visible = false; root.add(g);
+  return { g, santa, deer };
+}
+const sleigh = makeSleigh();
+// falling snow
+const snowFlakes = [];
+{
+  const sm = new THREE.SpriteMaterial({ map: softTex, color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
+  for (let i = 0; i < 260; i++) { const s = new THREE.Sprite(sm); s.scale.setScalar(0.07 + Math.random() * 0.08); s.visible = false; root.add(s); snowFlakes.push({ s, x: Math.random(), y: Math.random(), z: Math.random(), v: 0.4 + Math.random() * 0.6 }); }
+}
+function snowView(L, dt, t) {
+  const on = !!(L && L.snow);
+  for (const f of snowFlakes) {
+    f.s.visible = on;
+    if (!on) continue;
+    f.y -= f.v * dt * 0.08; if (f.y < 0) { f.y = 1; f.x = Math.random(); }
+    f.s.position.set(-6 + f.x * (L.W + 12) + Math.sin(t * 0.7 + f.z * 9) * 0.3, f.y * (L.H + 6), -1 + f.z * 8);
+  }
+}
+function eventView(tr, L, dt, t) {
+  segI = 0;
+  const E = L.event, ev = tr && tr.ev, sim = tr && tr.sim;
+  if (tr) for (const v of tr.visitors) {
+    const m = visitorMesh(v);
+    if (!v.visible || v.state === 'gone' || v.bikeOnly) { m.visible = false; continue; }
+    animatePerson(m, v, dt, t);
+  }
+  bike.visible = false; sleigh.g.visible = false;
+  if (tr && E && ev) {
+    if (E.type === 'hoist' && sim.nodes[ev.node]) {
+      const n = sim.nodes[ev.node];
+      if (eventPieces.wheel) eventPieces.wheel.position.set(n.x, n.y + 0.18, Z_OUT + 0.15);
+      const it = ev.item;
+      if (it && it.hanging) {
+        seg(ropeMat, 0.012, n.x + 0.12, n.y + 0.18, Z_OUT + 0.15, it.x, it.y + 0.75, Z_MID);
+        seg(ropeMat, 0.012, n.x - 0.12, n.y + 0.18, Z_OUT + 0.15, dave.position.x, dave.position.y + 1.9, dave.position.z);
+      }
+    }
+    if (E.type === 'zip' && ev.to && sim.nodes[ev.node]) {
+      const n = sim.nodes[ev.node], z = Z_OUT + 0.3, to = ev.to;
+      const riding = tr.visitors.find(v => v.state === 'zip');
+      const hx = riding ? riding.x : null, hy = riding ? riding.y + 2.05 : null;
+      if (riding) { seg(cableMat, 0.012, n.x, n.y + 0.2, z, hx, hy, z); seg(cableMat, 0.012, hx, hy, z, to.x, to.y + 2.2, -2.4); }
+      else seg(cableMat, 0.012, n.x, n.y + 0.2, z, to.x, to.y + 2.2, -2.4);
+      if (eventPieces.cable) eventPieces.cable.visible = false;
+    }
+    if (E.type === 'chute' && ev.node >= 0 && sim.nodes[ev.node]) {
+      const n = sim.nodes[ev.node];
+      if (eventPieces.chute) {
+        eventPieces.chute.position.set(n.x - eventPieces.chute.userData.x, n.y - eventPieces.chute.userData.y, 0);
+      }
+    }
+    if (E.type === 'bmx' && ev.r && ev.r.visible && ev.r.state !== 'flat' && ev.r.state !== 'gone') {
+      const r = ev.r;
+      bike.visible = true;
+      bike.position.set(r.x, r.y, Z_MID);
+      bike.rotation.set(0, 0, r.state === 'fly' ? Math.max(-0.5, Math.min(0.35, (r.vy || 0) * 0.08)) : 0);
+    }
+    if (E.type === 'sleigh' && ev.s && ev.s.state !== 'gone') {
+      const s = ev.s;
+      sleigh.g.visible = true;
+      sleigh.g.position.set(s.x, s.y + 0.1, Z_MID);
+      sleigh.g.rotation.z = s.state === 'fly' ? -0.08 : s.state === 'takeoff' ? 0.15 : s.state === 'crash' ? Math.min(1.2, (ev.st || 0) * 1.5) : 0;
+      sleigh.santa.visible = !(s.state === 'parked' && ev.st > 1 && ev.st < 6);
+      const flying = s.state === 'fly' || s.state === 'takeoff';
+      sleigh.deer.forEach((d, i) => { d.d.position.y = (flying ? 0.9 : 0.3) + Math.sin(t * 6 + i) * 0.05; for (const [k, l] of d.legs.entries()) l.rotation.z = flying ? Math.sin(t * 9 + k * 1.6 + i) * 0.5 : 0; });
+    }
+    if (E.type === 'launch' && rocketParts.g) {
+      rocketParts.g.position.y = ev.rocketY || 0;
+      const lit = ev.stage === 'lift' || ev.stage === 'done';
+      rocketParts.flame.visible = lit && ev.stage === 'lift';
+      if (rocketParts.flame.visible) { rocketParts.flame.scale.set(1 + Math.sin(t * 40) * 0.08, 1 + Math.sin(t * 31) * 0.15, 1); if (Math.random() < 0.6) puff(L.house.x0 + 1.1 + (Math.random() - 0.5) * 3, 0.3, -1 + Math.random() * 2, 3, 1.4, 0xd8d4cc); }
+    }
+  }
+  for (let i = segI; i < segPool.length; i++) segPool[i].visible = false;
+}
+function resetEventView() {
+  hideVisitors(); bike.visible = false; sleigh.g.visible = false;
+  for (const m of segPool) m.visible = false;
+  if (rocketParts.g) { rocketParts.g.position.y = 0; rocketParts.flame.visible = false; }
+  if (eventPieces.cable) eventPieces.cable.visible = true;
+  if (eventPieces.chute) eventPieces.chute.position.set(0, 0, 0);
 }

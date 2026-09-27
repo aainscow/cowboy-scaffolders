@@ -8,7 +8,7 @@ def strip_local(code):
 g1 = (src/'g1_world.js').read_text()
 imports = ''.join(l + '\n' for l in g1.splitlines() if l.startswith('import ') and "'./" not in l)
 g1_body = '\n'.join(l for l in g1.splitlines() if not l.startswith('import '))
-parts = [imports, strip_local((src/'engine.js').read_text()), strip_local((src/'levels.js').read_text()), g1_body,
+parts = [imports, strip_local((src/'events.js').read_text()), strip_local((src/'engine.js').read_text()), strip_local((src/'levels.js').read_text()), g1_body,
          (src/'g2_level.js').read_text(), (src/'g3_actors.js').read_text(), (src/'g4_game.js').read_text()]
 js = '\n'.join(parts)
 importmap = '<script type="importmap">{"imports":{"three":"%sbuild/three.module.js","three/addons/":"%sexamples/jsm/"}}</script>' % (THREE, THREE)
