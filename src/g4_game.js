@@ -204,7 +204,10 @@ const save = (() => {
     write() { try { localStorage.setItem('tf.save.v1', JSON.stringify(d)); } catch (e) { } },
   };
 })();
-const unlocked = (i) => i === 0 || (save.d.stars[LEVELS[i - 1].id] || 0) > 0 || (save.d.stars[LEVELS[i].id] || 0) > 0;
+// Dev shortcut: add ?dev or #dev to the URL (e.g. .../cowboy-scaffolders/?dev#job20) to open every job.
+// Nothing is saved, so progress is untouched once you drop it from the URL.
+const DEV = /[?#&]dev\b/i.test(location.search + location.hash);
+const unlocked = (i) => DEV || i === 0 || (save.d.stars[LEVELS[i - 1].id] || 0) > 0 || (save.d.stars[LEVELS[i].id] || 0) > 0;
 
 const $ = (id) => document.getElementById(id);
 const glz = () => (S.L && S.L.glazier) || GLAZIER;
@@ -1019,7 +1022,7 @@ function openSelect() {
       <span class="best num">${best ? 'Best ' + fmt(best) + ' · ' : ''}Quote ${fmt(d.budget)}</span></button>`;
   }).join('');
   $('cards').innerHTML = cards;
-  $('chavTally').textContent = save.d.chavKills ? `Chavs nicked: ${save.d.chavKills}` : '';
+  $('chavTally').textContent = (DEV ? 'DEV MODE: all jobs open' + (save.d.chavKills ? ' · ' : '') : '') + (save.d.chavKills ? `Chavs nicked: ${save.d.chavKills}` : '');
   $('cards').querySelectorAll('.card').forEach(c => c.addEventListener('click', () => { sfx.unlock(); sfx.click(); show('select', false); loadLevel(+c.dataset.i); openBrief(); }));
   show('select');
 }

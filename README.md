@@ -57,3 +57,5 @@ python3 build.py          # rebuild dist/ and docs/
 node test/refs.mjs        # every job must still be solvable
 python3 -m http.server -d docs 8000   # play locally at http://localhost:8000
 ```
+
+Dev shortcut: add `?dev` to the URL to open every job (e.g. `https://aainscow.github.io/cowboy-scaffolders/?dev`). Combine with `#jobN` to jump straight to a job: `?dev#job24`. Nothing is saved to your progress.
