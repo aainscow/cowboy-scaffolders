@@ -189,6 +189,7 @@ const STYLES = {
   police: { top: 0xc8f000, vest: true, glow: 0x88aa00, sleeve: 0x1b2233, legs: 0x1b2233, shoe: 0x111111, hat: 'police', hatCol: 0x141c2e, skin: 0xe8b996 },
   sheila: { top: 0xf2a7c3, sleeve: 0xf2a7c3, legs: 0xf6dfe6, shoe: 0xff8fbf, hat: 'curlers', hatCol: 0x9a6a44, skin: 0xf0c4a4, gown: 0xf2a7c3, trim: 0xfff4f7 },
   agency: { top: 0xf3d40b, vest: true, glow: 0x886600, sleeve: 0x55595e, legs: 0x3b5a85, shoe: 0x2a2a2a, hat: 'hard', hatCol: 0x2a6bd6, skin: 0xc98e6a },
+  roofer: { top: 0x1f3b73, sleeve: 0x1f3b73, legs: 0x2a2d33, shoe: 0x3a2a1c, hat: 'hard', hatCol: 0xf3d40b, skin: 0xd99c7d, stripe: 0x1f3b73 },
   guest0: { top: 0xe0408a, sleeve: 0xe0408a, legs: 0x2b3f6b, shoe: 0x222222, hat: 'party', hatCol: 0xf3d40b, skin: 0xe7b48f, stripe: 0xffffff },
   guest1: { top: 0x2dbf8a, sleeve: 0x2dbf8a, legs: 0x2a2d33, shoe: 0xf6f6f6, hat: 'party', hatCol: 0xd8203a, skin: 0x8d5a3b, stripe: 0x1a6f4f },
   guest2: { top: 0xf3d40b, sleeve: 0xf3d40b, legs: 0x3b5a85, shoe: 0x5a3a22, hat: 'hair', hatCol: 0x3b2a1c, skin: 0xf2c9a8, stripe: 0xb8950a },
@@ -829,9 +830,13 @@ function makeItem(key) {
       break;
     }
     case 'rubble': {
-      const bag = new THREE.MeshStandardMaterial({ color: 0x3c3f44, roughness: 0.8 });
-      add(new THREE.SphereGeometry(0.3, 10, 8), bag, 0, 0.25, 0).scale.set(1, 0.8, 0.8);
-      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(0.2, 0.02, 0.14), new THREE.MeshStandardMaterial({ color: 0x4a5058 }), (i - 1.5) * 0.08, 0.48, 0, 0.4, i, 0.3);
+      // a builder's bulk bag of old slates, with the loops still on
+      const bag = new THREE.MeshStandardMaterial({ color: 0xe9e6dc, roughness: 0.95 });
+      add(new RoundedBoxGeometry(0.56, 0.42, 0.46, 3, 0.1), bag, 0, 0.21, 0);
+      const slateM = new THREE.MeshStandardMaterial({ color: 0x3f454d, roughness: 0.6 });
+      for (let i = 0; i < 7; i++) add(new THREE.BoxGeometry(0.22, 0.015, 0.14), slateM, (i % 3 - 1) * 0.14, 0.43 + (i % 2) * 0.03, (Math.floor(i / 3) - 1) * 0.1, 0.3 + i * 0.4, i, 0.5 - i * 0.2);
+      const loop = new THREE.MeshStandardMaterial({ color: 0x1d5da8, roughness: 0.8 });
+      for (const [x, z] of [[-0.24, -0.2], [0.24, -0.2], [-0.24, 0.2], [0.24, 0.2]]) add(new THREE.TorusGeometry(0.06, 0.015, 5, 10, Math.PI), loop, x, 0.42, z);
       break;
     }
     case 'fireworks': {
@@ -1357,6 +1362,19 @@ function eventView(tr, L, dt, t) {
       else seg(cableMat, 0.012, n.x, n.y + 0.2, z, to.x, to.y + 2.2, -2.4);
       if (eventPieces.cable) eventPieces.cable.visible = false;
     }
+    if (E.type === 'chute') {
+      const h = L.house, zy = L.zones[0].y;
+      const bx = E.bags[Math.min(ev.i, E.bags.length - 1)];
+      roofers.forEach((r, k) => {
+        r.visible = true;
+        const home = k === 0 ? Math.max(h.x0 + 1, bx - 0.4) : Math.min(h.x1 - 1, bx + 1.4);
+        const u = r.userData, A = u.anim;
+        A.tx = A.tx ?? home; A.tx += (home - A.tx) * Math.min(1, dt * 1.5);
+        const throwing = k === 0 && ev.stage === 'throw';
+        const p = { who: 'roofer', x: A.tx, y: h.eaves + 0.05, z: 0.15, yaw: 0, state: throwing ? 'dump' : 'watch', mode: 'ground', face: 1, t: throwing ? ev.st : 0, visible: true, onBoard: -1 };
+        animatePerson(r, p, dt, t);
+      });
+    }
     if (E.type === 'chute' && ev.node >= 0 && sim.nodes[ev.node]) {
       const n = sim.nodes[ev.node];
       if (eventPieces.chute) {
@@ -1387,7 +1405,10 @@ function eventView(tr, L, dt, t) {
   }
   for (let i = segI; i < segPool.length; i++) segPool[i].visible = false;
 }
+const roofers = [makePerson('roofer'), makePerson('roofer')];
+for (const r of roofers) { r.visible = false; root.add(r); }
 function resetEventView() {
+  for (const r of roofers) { r.visible = false; r.userData.anim.tx = undefined; }
   hideVisitors(); bike.visible = false; sleigh.g.visible = false;
   for (const m of segPool) m.visible = false;
   if (rocketParts.g) { rocketParts.g.position.y = 0; rocketParts.flame.visible = false; }

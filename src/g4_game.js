@@ -1139,7 +1139,7 @@ function eventStatus(tr) {
     case 'hoist': return ['Hoisting', { walk: 'Dave is hooking on the next load', lift: `Hauling up the ${ev.item ? ev.item.def.name.toLowerCase() : 'load'}`, swing: 'Swinging it in', rest: 'Landed', home: 'All up', done: 'All up' }[ev.stage] || ''];
     case 'party': return ['Party', ev.partyT < 0 ? `Guests arriving: ${up} of ${E.guests} up` : ev.partyT <= E.dur ? `Dancing! ${Math.max(0, E.dur - ev.partyT).toFixed(0)} s to go` : 'Everyone going home'];
     case 'zip': { const r = V.find(v => v.state === 'zip'); const c = V.find(v => v.state !== 'gone' && v.state !== 'wait'); return ['Zip wire', r ? `${r.name} is on the wire!` : c ? `${c.name} is climbing up` : 'All across']; }
-    case 'chute': return ['Stripping the roof', `Bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length}${ev.stage === 'fall' ? ': down it goes' : ''}`];
+    case 'chute': return ['Stripping the roof', ev.stage === 'fall' ? `Bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length}: down the chute` : `The roofers are throwing down bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length} of old slates`];
     case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', splash: 'SPLASH!' }[r.state] || '']; }
     case 'sleigh': { const st = ev.s.state; return ['Christmas Eve', { fly: 'Sleigh on approach…', slide: 'Touchdown! Braking…', parked: 'Parked. Presents going down the chimney', takeoff: 'And away!' }[st] || '']; }
     case 'fireworks': return ['Bonfire Night', ev.lit ? (ev.fired < E.rockets ? `Rocket ${ev.fired} of ${E.rockets}` : 'Grand finale done') : 'Terry is climbing up with a lighter'];
@@ -1432,7 +1432,7 @@ function eventFx(ev, L, tr) {
   } else if (ev.type === 'zip') {
     if (ev.what === 'go') { say(ev.name === 'Sheila' ? 'WHEEEEE!' : ev.name === 'The vicar' ? 'LORD ABOVE!' : 'GERONIMOOO!', L.W, zy + 2.4, '', 2); sfx.snap(); }
   } else if (ev.type === 'chute') {
-    if (ev.what === 'throw') { sfx.crack(); }
+    if (ev.what === 'throw') { sfx.crack(); say(['INCOMING!', 'MIND YER HEADS!', 'BELOW!'][Math.floor(Math.random() * 3)], ev.x, L.house.eaves + 2.4, '', 1.4); }
     if (ev.what === 'skip') { sfx.thud(200); puff(ev.x, 1.2, 2.3, 8, 0.6, 0x7a7266); }
     if (ev.what === 'car') { sfx.glass(); sfx.thud(200); say("THE BISHOP'S CAR!", ev.x, 2.4, 'sued', 2); puff(ev.x, 1.2, 3.6, 10, 0.7, 0x7a7266); S.shake = Math.max(S.shake, 0.12); }
     if (ev.what === 'mess') { sfx.thud(150); puff(ev.x, 0.4, Z_MID, 8, 0.6, 0x7a7266); }

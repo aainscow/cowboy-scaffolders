@@ -308,7 +308,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
     <button class="big" id="playBtn">Clock on</button>
     <div class="fine">Best in landscape. Headphones on for the crashes.</div>
     <div class="fine">Big Terry wants it cheap. Dave just wants to get home.</div>
-    <div class="fine">Build 2026-09-27 22:34 UTC</div>
+    <div class="fine">Build 2026-09-28 20:02 UTC</div>
   </div>
 </div>
 
@@ -316,7 +316,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
   <div class="sheet panel">
     <h2>Job sheet</h2>
     <div class="tally" id="chavTally"></div>
-    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-09-27 22:34 UTC</div>
+    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-09-28 20:02 UTC</div>
     <div class="sub">Twenty-four jobs. Houses first, then the specials: a mill, Terry's party, a church, an abbey, a zip wire, a BMX, fireworks, Father Christmas, a bell tower, two skyscrapers and a rocket. Whatever you don't spend is profit.</div>
     <div class="grid" id="cards"></div>
   </div>
@@ -2575,7 +2575,7 @@ const LEVELS = [
     id: 16, name: 'Down the Chute', client: 'Brother Anselm, Kirkby Abbey',
     brief: "The roofers are stripping the old slates from the abbey roof and throwing them down onto your platform at 6 m. Get the rubble down a chute into the skip. The Bishop has parked next to it.",
     tip: "The skip is at 10½–12 m, so the chute has to hang off a board end over it. No chute and the roofers throw it off the end, onto the Bishop's car.",
-    W: 12, H: 7,
+    W: 12, H: 9,
     house: { style: 'abbey', x0: 0.5, x1: 10, floors: 2, eaves: 8, brick: 'stone', door: { x: 1.2, w: 1.4, h: 3, color: '#3b2616', arch: true }, windows: [{ x: 3.6, y: 1.2, w: 1.1, h: 3.2, kind: 'lancet' }, { x: 6.4, y: 1.2, w: 1.1, h: 3.2, kind: 'lancet' }, { x: 3.6, y: 5.2, w: 1.1, h: 2, kind: 'lancet' }, { x: 6.4, y: 5.2, w: 1.1, h: 2, kind: 'lancet' }], roof: 'gable' },
     zones: [{ x0: 2, x1: 10, y: 6, label: 'Roof strip' }],
     deliveries: [],
@@ -4151,6 +4151,7 @@ const STYLES = {
   police: { top: 0xc8f000, vest: true, glow: 0x88aa00, sleeve: 0x1b2233, legs: 0x1b2233, shoe: 0x111111, hat: 'police', hatCol: 0x141c2e, skin: 0xe8b996 },
   sheila: { top: 0xf2a7c3, sleeve: 0xf2a7c3, legs: 0xf6dfe6, shoe: 0xff8fbf, hat: 'curlers', hatCol: 0x9a6a44, skin: 0xf0c4a4, gown: 0xf2a7c3, trim: 0xfff4f7 },
   agency: { top: 0xf3d40b, vest: true, glow: 0x886600, sleeve: 0x55595e, legs: 0x3b5a85, shoe: 0x2a2a2a, hat: 'hard', hatCol: 0x2a6bd6, skin: 0xc98e6a },
+  roofer: { top: 0x1f3b73, sleeve: 0x1f3b73, legs: 0x2a2d33, shoe: 0x3a2a1c, hat: 'hard', hatCol: 0xf3d40b, skin: 0xd99c7d, stripe: 0x1f3b73 },
   guest0: { top: 0xe0408a, sleeve: 0xe0408a, legs: 0x2b3f6b, shoe: 0x222222, hat: 'party', hatCol: 0xf3d40b, skin: 0xe7b48f, stripe: 0xffffff },
   guest1: { top: 0x2dbf8a, sleeve: 0x2dbf8a, legs: 0x2a2d33, shoe: 0xf6f6f6, hat: 'party', hatCol: 0xd8203a, skin: 0x8d5a3b, stripe: 0x1a6f4f },
   guest2: { top: 0xf3d40b, sleeve: 0xf3d40b, legs: 0x3b5a85, shoe: 0x5a3a22, hat: 'hair', hatCol: 0x3b2a1c, skin: 0xf2c9a8, stripe: 0xb8950a },
@@ -4791,9 +4792,13 @@ function makeItem(key) {
       break;
     }
     case 'rubble': {
-      const bag = new THREE.MeshStandardMaterial({ color: 0x3c3f44, roughness: 0.8 });
-      add(new THREE.SphereGeometry(0.3, 10, 8), bag, 0, 0.25, 0).scale.set(1, 0.8, 0.8);
-      for (let i = 0; i < 4; i++) add(new THREE.BoxGeometry(0.2, 0.02, 0.14), new THREE.MeshStandardMaterial({ color: 0x4a5058 }), (i - 1.5) * 0.08, 0.48, 0, 0.4, i, 0.3);
+      // a builder's bulk bag of old slates, with the loops still on
+      const bag = new THREE.MeshStandardMaterial({ color: 0xe9e6dc, roughness: 0.95 });
+      add(new RoundedBoxGeometry(0.56, 0.42, 0.46, 3, 0.1), bag, 0, 0.21, 0);
+      const slateM = new THREE.MeshStandardMaterial({ color: 0x3f454d, roughness: 0.6 });
+      for (let i = 0; i < 7; i++) add(new THREE.BoxGeometry(0.22, 0.015, 0.14), slateM, (i % 3 - 1) * 0.14, 0.43 + (i % 2) * 0.03, (Math.floor(i / 3) - 1) * 0.1, 0.3 + i * 0.4, i, 0.5 - i * 0.2);
+      const loop = new THREE.MeshStandardMaterial({ color: 0x1d5da8, roughness: 0.8 });
+      for (const [x, z] of [[-0.24, -0.2], [0.24, -0.2], [-0.24, 0.2], [0.24, 0.2]]) add(new THREE.TorusGeometry(0.06, 0.015, 5, 10, Math.PI), loop, x, 0.42, z);
       break;
     }
     case 'fireworks': {
@@ -5319,6 +5324,19 @@ function eventView(tr, L, dt, t) {
       else seg(cableMat, 0.012, n.x, n.y + 0.2, z, to.x, to.y + 2.2, -2.4);
       if (eventPieces.cable) eventPieces.cable.visible = false;
     }
+    if (E.type === 'chute') {
+      const h = L.house, zy = L.zones[0].y;
+      const bx = E.bags[Math.min(ev.i, E.bags.length - 1)];
+      roofers.forEach((r, k) => {
+        r.visible = true;
+        const home = k === 0 ? Math.max(h.x0 + 1, bx - 0.4) : Math.min(h.x1 - 1, bx + 1.4);
+        const u = r.userData, A = u.anim;
+        A.tx = A.tx ?? home; A.tx += (home - A.tx) * Math.min(1, dt * 1.5);
+        const throwing = k === 0 && ev.stage === 'throw';
+        const p = { who: 'roofer', x: A.tx, y: h.eaves + 0.05, z: 0.15, yaw: 0, state: throwing ? 'dump' : 'watch', mode: 'ground', face: 1, t: throwing ? ev.st : 0, visible: true, onBoard: -1 };
+        animatePerson(r, p, dt, t);
+      });
+    }
     if (E.type === 'chute' && ev.node >= 0 && sim.nodes[ev.node]) {
       const n = sim.nodes[ev.node];
       if (eventPieces.chute) {
@@ -5349,7 +5367,10 @@ function eventView(tr, L, dt, t) {
   }
   for (let i = segI; i < segPool.length; i++) segPool[i].visible = false;
 }
+const roofers = [makePerson('roofer'), makePerson('roofer')];
+for (const r of roofers) { r.visible = false; root.add(r); }
 function resetEventView() {
+  for (const r of roofers) { r.visible = false; r.userData.anim.tx = undefined; }
   hideVisitors(); bike.visible = false; sleigh.g.visible = false;
   for (const m of segPool) m.visible = false;
   if (rocketParts.g) { rocketParts.g.position.y = 0; rocketParts.flame.visible = false; }
@@ -6498,7 +6519,7 @@ function eventStatus(tr) {
     case 'hoist': return ['Hoisting', { walk: 'Dave is hooking on the next load', lift: `Hauling up the ${ev.item ? ev.item.def.name.toLowerCase() : 'load'}`, swing: 'Swinging it in', rest: 'Landed', home: 'All up', done: 'All up' }[ev.stage] || ''];
     case 'party': return ['Party', ev.partyT < 0 ? `Guests arriving: ${up} of ${E.guests} up` : ev.partyT <= E.dur ? `Dancing! ${Math.max(0, E.dur - ev.partyT).toFixed(0)} s to go` : 'Everyone going home'];
     case 'zip': { const r = V.find(v => v.state === 'zip'); const c = V.find(v => v.state !== 'gone' && v.state !== 'wait'); return ['Zip wire', r ? `${r.name} is on the wire!` : c ? `${c.name} is climbing up` : 'All across']; }
-    case 'chute': return ['Stripping the roof', `Bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length}${ev.stage === 'fall' ? ': down it goes' : ''}`];
+    case 'chute': return ['Stripping the roof', ev.stage === 'fall' ? `Bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length}: down the chute` : `The roofers are throwing down bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length} of old slates`];
     case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', splash: 'SPLASH!' }[r.state] || '']; }
     case 'sleigh': { const st = ev.s.state; return ['Christmas Eve', { fly: 'Sleigh on approach…', slide: 'Touchdown! Braking…', parked: 'Parked. Presents going down the chimney', takeoff: 'And away!' }[st] || '']; }
     case 'fireworks': return ['Bonfire Night', ev.lit ? (ev.fired < E.rockets ? `Rocket ${ev.fired} of ${E.rockets}` : 'Grand finale done') : 'Terry is climbing up with a lighter'];
@@ -6791,7 +6812,7 @@ function eventFx(ev, L, tr) {
   } else if (ev.type === 'zip') {
     if (ev.what === 'go') { say(ev.name === 'Sheila' ? 'WHEEEEE!' : ev.name === 'The vicar' ? 'LORD ABOVE!' : 'GERONIMOOO!', L.W, zy + 2.4, '', 2); sfx.snap(); }
   } else if (ev.type === 'chute') {
-    if (ev.what === 'throw') { sfx.crack(); }
+    if (ev.what === 'throw') { sfx.crack(); say(['INCOMING!', 'MIND YER HEADS!', 'BELOW!'][Math.floor(Math.random() * 3)], ev.x, L.house.eaves + 2.4, '', 1.4); }
     if (ev.what === 'skip') { sfx.thud(200); puff(ev.x, 1.2, 2.3, 8, 0.6, 0x7a7266); }
     if (ev.what === 'car') { sfx.glass(); sfx.thud(200); say("THE BISHOP'S CAR!", ev.x, 2.4, 'sued', 2); puff(ev.x, 1.2, 3.6, 10, 0.7, 0x7a7266); S.shake = Math.max(S.shake, 0.12); }
     if (ev.what === 'mess') { sfx.thud(150); puff(ev.x, 0.4, Z_MID, 8, 0.6, 0x7a7266); }

@@ -176,7 +176,7 @@ export const LEVELS = [
     id: 16, name: 'Down the Chute', client: 'Brother Anselm, Kirkby Abbey',
     brief: "The roofers are stripping the old slates from the abbey roof and throwing them down onto your platform at 6 m. Get the rubble down a chute into the skip. The Bishop has parked next to it.",
     tip: "The skip is at 10½–12 m, so the chute has to hang off a board end over it. No chute and the roofers throw it off the end, onto the Bishop's car.",
-    W: 12, H: 7,
+    W: 12, H: 9,
     house: { style: 'abbey', x0: 0.5, x1: 10, floors: 2, eaves: 8, brick: 'stone', door: { x: 1.2, w: 1.4, h: 3, color: '#3b2616', arch: true }, windows: [{ x: 3.6, y: 1.2, w: 1.1, h: 3.2, kind: 'lancet' }, { x: 6.4, y: 1.2, w: 1.1, h: 3.2, kind: 'lancet' }, { x: 3.6, y: 5.2, w: 1.1, h: 2, kind: 'lancet' }, { x: 6.4, y: 5.2, w: 1.1, h: 2, kind: 'lancet' }], roof: 'gable' },
     zones: [{ x0: 2, x1: 10, y: 6, label: 'Roof strip' }],
     deliveries: [],
