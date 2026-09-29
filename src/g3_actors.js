@@ -1400,7 +1400,15 @@ function eventView(tr, L, dt, t) {
       rocketParts.g.position.y = ev.rocketY || 0;
       const lit = ev.stage === 'lift' || ev.stage === 'done';
       rocketParts.flame.visible = lit && ev.stage === 'lift';
-      if (rocketParts.flame.visible) { rocketParts.flame.scale.set(1 + Math.sin(t * 40) * 0.08, 1 + Math.sin(t * 31) * 0.15, 1); if (Math.random() < 0.6) puff(L.house.x0 + 1.1 + (Math.random() - 0.5) * 3, 0.3, -1 + Math.random() * 2, 3, 1.4, 0xd8d4cc); }
+      if (rocketParts.flame.visible) {
+        const k = Math.min(1, ev.st / 1.2), cx = (L.house.x0 + L.house.x1) / 2, ny = Math.max(0, ev.rocketY);
+        const sy = (1 + Math.sin(t * 31) * 0.15) * (0.5 + 1.3 * k);
+        rocketParts.flame.scale.set((1 + Math.sin(t * 40) * 0.08) * (0.6 + 0.6 * k), sy, 1 + 0.6 * k); rocketParts.flame.position.y = -3 * sy;
+        // smoke boiling off the pad while it's low, then a trail behind it
+        if (ny < 6) for (let i = 0; i < 3; i++) puff(cx + (Math.random() - 0.3) * 6, 0.3, -1 + Math.random() * 3, 2, 1.6 + Math.random(), 0xdcd8cf);
+        if (ev.rocketY > 0.5 && Math.random() < 0.8) puff(cx + (Math.random() - 0.5) * 0.8, ny - 2 - Math.random() * 3, -1.1, 2, 1.2, 0xe8e4dc);
+        S.shake = Math.max(S.shake, 0.18 * Math.max(0, 1 - ny / 30));
+      }
     }
   }
   for (let i = segI; i < segPool.length; i++) segPool[i].visible = false;

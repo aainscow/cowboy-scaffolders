@@ -272,7 +272,7 @@ export const LEVELS = [
     house: { style: 'rocket', x0: 0.4, x1: 2.6, floors: 0, eaves: 20, brick: 'render', windows: [], roof: 'flat' },
     zones: [{ x0: 3, x1: 6, y: 12, label: 'Capsule hatch' }],
     deliveries: [{ item: 'kit', zone: 0, x: 4 }],
-    event: { type: 'launch', capsuleX: 3.3, blast: 34 },
+    event: { type: 'launch', capsuleX: 3.3, blast: 280 },
     maxTies: 0, wind: 6, gust: 6, heavy: true, deck: true,
     budget: 4230, chavs: 0, startX: 14,
   },

@@ -451,7 +451,7 @@ export class Sim {
       // predict
       for (const n of nodes) {
         if (n.w === 0) continue;
-        const fx = wind * n.expo * (1 + 0.06 * Math.max(0, n.y)) + (n.efx || 0);
+        const fx = wind * n.expo * (1 + 0.06 * Math.max(0, n.y)) + (n.efx || 0) + (this.blastAt ? this.blastAt(n) : 0);
         n.fx = fx;
         n.vx += h * fx * n.w;
         n.vy -= h * GRAV;

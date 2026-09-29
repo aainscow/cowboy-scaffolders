@@ -500,11 +500,23 @@ function launchUpdate(E, ev, dt) {
   } else if (ev.stage === 'count') {
     if (ev.st > 1) { ev.st = 0; ev.n--; this.events.push({ type: 'launch', what: 'count', n: ev.n }); if (ev.n <= 0) { ev.stage = 'lift'; this.events.push({ type: 'launch', what: 'ignition' }); } }
   } else if (ev.stage === 'lift') {
-    const t = ev.st;
-    const env = t < 1 ? t : t < 4 ? 1 : Math.max(0, 1 - (t - 4) / 2.5);
-    this.sim.blast = E.blast * env * (1 + 0.25 * Math.sin(t * 23));
-    ev.rocketY = t < 1.2 ? 0 : 0.5 * 5 * (t - 1.2) * (t - 1.2);
-    if (t > 7) { this.sim.blast = 0; ev.stage = 'done'; this.events.push({ type: 'launch', what: 'away' }); }
+    // engines build up on the pad, then the rocket climbs past the tower. The flame deflects
+    // sideways off the pad at first, then the plume blasts whatever part of the tower the
+    // nozzle is level with, working its way up.
+    const t = ev.st, L = this.level, B = E.blast, rx = L.house.x1;
+    const hold = 1.6;
+    ev.rocketY = t < hold ? 0 : 0.7 * (t - hold) * (t - hold);
+    const nozzle = ev.rocketY - 0.3;
+    ev.nozzleY = nozzle;
+    const ramp = Math.min(1, t / 1.0);
+    const fade = ev.rocketY > 20 ? Math.max(0, 1 - (ev.rocketY - 20) / 12) : 1;
+    this.sim.blastAt = (n) => {
+      const side = Math.exp(-Math.max(0, n.x - rx) / 5);
+      const ground = Math.exp(-Math.max(0, nozzle) / 3) * Math.exp(-Math.max(0, n.y) / 2.5);
+      const dz = (n.y - nozzle) / 1.8, plume = Math.exp(-dz * dz);
+      return B * n.expo * side * ramp * fade * (1.2 * ground + plume) * (1 + 0.3 * Math.sin(t * 23 + n.y * 1.7));
+    };
+    if (ev.rocketY > 45) { this.sim.blastAt = null; ev.stage = 'done'; this.events.push({ type: 'launch', what: 'away' }); }
   } else if (ev.stage === 'done') this._eventEnd();
 }
 
@@ -542,7 +554,7 @@ export function eventMixin(T) {
     _eventEnd() {
       if (this.phase !== 'event') return;
       this.evDone = true;
-      this.sim.blast = 0;
+      this.sim.blast = 0; this.sim.blastAt = null;
       this._startNight();
     },
     _removeLoad(ld) {

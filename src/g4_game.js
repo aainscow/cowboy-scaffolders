@@ -1034,7 +1034,9 @@ function openBrief() {
   $('briefBack').onclick = () => { sfx.click(); show('brief', false); openSelect(); };
 }
 
+function resetRocketCam() { if (S.rocketCam) { controls.target.y -= S.rocketCam; camera.position.y -= S.rocketCam; S.rocketCam = 0; } }
 function enterDesign() {
+  resetRocketCam();
   S.mode = 'design';
   show('select', false); show('title', false); show('result', false); show('status', false);
   hudDesign(true);
@@ -1093,6 +1095,7 @@ function startTest() {
   if (!S.req) return;
   sfx.unlock(); sfx.clank(1);
   S.mode = 'test';
+  resetRocketCam();
   if ($('kitIntro')) $('kitIntro').hidden = true;
   S.trial = new Trial(S.L, cleanPieces(S.pieces));
   S.trial.skipDeliveries = !S.req.ok;
@@ -1143,7 +1146,7 @@ function eventStatus(tr) {
     case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', splash: 'SPLASH!' }[r.state] || '']; }
     case 'sleigh': { const st = ev.s.state; return ['Christmas Eve', { fly: 'Sleigh on approach…', slide: 'Touchdown! Braking…', parked: 'Parked. Presents going down the chimney', takeoff: 'And away!' }[st] || '']; }
     case 'fireworks': return ['Bonfire Night', ev.lit ? (ev.fired < E.rockets ? `Rocket ${ev.fired} of ${E.rockets}` : 'Grand finale done') : 'Terry is climbing up with a lighter'];
-    case 'launch': return ['Launch', ev.stage === 'climb' ? 'The astronaut is climbing up' : ev.stage === 'count' ? `T minus ${ev.n}` : ev.stage === 'lift' ? 'LIFT-OFF!' : 'Clear of the tower'];
+    case 'launch': return ['Launch', ev.stage === 'climb' ? 'The astronaut is climbing up' : ev.stage === 'count' ? `T minus ${ev.n}` : ev.stage === 'lift' ? (ev.rocketY < 0.2 ? 'Main engines building up…' : ev.nozzleY < 14 ? `LIFT-OFF! Exhaust blasting the tower at ${Math.max(0, ev.nozzleY).toFixed(0)} m` : 'Clearing the tower…') : 'Clear of the tower'];
   }
   return ['', ''];
 }
@@ -1509,6 +1512,12 @@ function shout(text, x, y, cls = '', z = Z_OUT + 0.5) {
 
 function renderTrial(dt) {
   const tr = S.trial, sim = tr.sim;
+  // launch: the camera tilts up after the rocket, then settles back on the tower
+  if (tr.ev && tr.ev.type === 'launch') {
+    const want = tr.ev.stage === 'lift' ? Math.min(26, Math.max(0, (tr.ev.rocketY || 0) - 4) * 0.8) : 0;
+    const step = (want - (S.rocketCam || 0)) * Math.min(1, dt * 2.5);
+    if (Math.abs(step) > 1e-5) { S.rocketCam = (S.rocketCam || 0) + step; controls.target.y += step; camera.position.y += step; }
+  }
   // pending pieces as a faint blueprint
   const ghost = [];
   for (let i = tr.idx + (tr.building && tr.building._added ? 1 : 0); i < tr.pieces.length; i++) {
