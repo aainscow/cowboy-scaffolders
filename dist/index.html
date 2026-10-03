@@ -200,6 +200,12 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
 #orderPanel li button:hover { background: rgba(255,255,255,.2); }
 .lbl.order.done { background: var(--safe); color: #fff; }
 .lbl.shout.sued { color: #ff3b30; font-size: 34px; }
+.lbl.bmx { background: rgba(255, 45, 138, .92); color: #fff; padding: 2px 7px; border-radius: 3px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.lbl.bmx.ok { background: rgba(46, 158, 79, .95); }
+.sect { grid-column: 1 / -1; margin: 10px 2px 0; font-family: var(--cond); font-size: 14px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-dim); border-top: 1px solid var(--line); padding-top: 10px; }
+.sect b { color: #ff2d8a; }
+.card.bonus { border-color: rgba(255,45,138,.45); }
+.card.bonus .cn { color: #ff2d8a; }
 .lbl.risk { background: rgba(243, 212, 11, .92); color: #161b21; padding: 2px 7px; border-radius: 3px; font-size: 11.5px; }
 .lbl.shout.sheila { color: #ff8fc4; font-size: 21px; white-space: normal; width: 190px; text-align: center; line-height: 1.05; }
 .lbl.shout.monster { color: #c77dff; font-size: 26px; white-space: normal; width: 230px; text-align: center; line-height: 1.05; }
@@ -308,7 +314,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
     <button class="big" id="playBtn">Clock on</button>
     <div class="fine">Best in landscape. Headphones on for the crashes.</div>
     <div class="fine">Big Terry wants it cheap. Dave just wants to get home.</div>
-    <div class="fine">Build 2026-09-29 11:50 UTC</div>
+    <div class="fine">Build 2026-10-03 11:33 UTC</div>
   </div>
 </div>
 
@@ -316,7 +322,7 @@ button:focus-visible { outline: 2px solid var(--hivis-yellow); outline-offset: 2
   <div class="sheet panel">
     <h2>Job sheet</h2>
     <div class="tally" id="chavTally"></div>
-    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-09-29 11:50 UTC</div>
+    <div class="fine" style="opacity:.55;font-size:11px">Build 2026-10-03 11:33 UTC</div>
     <div class="sub">Twenty-four jobs. Houses first, then the specials: a mill, Terry's party, a church, an abbey, a zip wire, a BMX, fireworks, Father Christmas, a bell tower, two skyscrapers and a rocket. Whatever you don't spend is profit.</div>
     <div class="grid" id="cards"></div>
   </div>
@@ -378,15 +384,171 @@ function hoistLanding(sim, level, wx, w = 0.8) {
   }
   return best;
 }
-// Where the BMX lands: ride right from the start along real boards, launch off the end.
-function bmxFlight(sim, level, E) {
-  const zy = level.zones[0].y;
-  const run = boardRun(sim, zy, E.start + 0.3);
-  if (!run) return null;
-  const h = zy + 0.15 - level.groundAt(run.x1 + 2);
-  const vy = E.hop, v = E.v;
-  const t = (vy + Math.sqrt(vy * vy + 2 * GRAV * h)) / GRAV;
-  return { launch: run.x1, land: run.x1 + v * t };
+// ---------------------------------------------------------------------------
+//  The BMX. One rider model, stepped at a fixed rate, drives both the live
+//  run and the design-time prediction (the dotted line and the checklist), so
+//  what the checklist promises is what happens, unless the scaffold gives way.
+// ---------------------------------------------------------------------------
+const RAMP = { cost: 25, vy: 5 };      // kicker: launches him up and on
+const QPIPE = { cost: 35, vy: 5.5 };   // quarter pipe: straight up, back down the way he came
+const BMX_DT = 1 / 120;
+const BMX_MASS = 85;
+function bmxSpec(level) {
+  const E = level.event, z = level.zones[0];
+  const start = typeof E.start === 'number' ? { x: E.start, y: z.y, dir: 1 } : { y: z.y, dir: 1, ...E.start };
+  const finish = E.finish || { kind: 'ground', x0: E.pool[0], x1: E.pool[1], y: 0.3, prop: 'pool', label: 'paddling pool' };
+  return { start, v: E.v ?? 6, hop: E.hop ?? 0.8, finish, hoops: E.hoops || [], obstacles: E.obstacles || [], drain: E.drain || null, maxDrop: E.maxDrop ?? 3.5 };
+}
+// What the rider can touch: boards (real or trap), fixed ledges, and the kit on the joints.
+function bmxWorld(sim, level, pieces) {
+  const B = bmxSpec(level), E = level.event;
+  const ledges = [];
+  if (B.finish.kind === 'ledge') ledges.push({ ...B.finish, finish: true });
+  for (const l of E.ledges || []) ledges.push(l);
+  const lv = new Set(sim.boards.map(b => b.gy));
+  for (const l of ledges) lv.add(l.y);
+  const at = (type) => { const m = new Map(); for (const q of pieces) if (q.type === type) m.set(q.a[0] + ',' + q.a[1], q); return m; };
+  const hatch = pieces.find(q => q.type === 'hatch');
+  const broken = new Set();
+  return {
+    B, level, broken, ledges, levels: [...lv].sort((a, b) => b - a), ramps: at('ramp'), qpipes: at('qpipe'), hatchX: hatch ? hatch.a[0] : null,
+    surf(x, gy) {
+      for (const l of ledges) if (l.y === gy && x >= l.x0 - 1e-9 && x <= l.x1 + 1e-9) return { ledge: l };
+      let best = null;
+      for (const bd of sim.boards) {
+        if (bd.broken || broken.has(bd.id) || bd.gy !== gy || x < bd.x0 - 1e-6 || x > bd.x1 + 1e-6) continue;
+        if (!best || (best.type.id === 'trap' && bd.type.id !== 'trap')) best = bd;
+      }
+      return best ? { bd: best, trap: best.type.id === 'trap' } : null;
+    },
+  };
+}
+function bmxNew(B) {
+  return { mode: 'ride', x: B.start.x + B.start.dir * 0.3, y: B.start.y, gy: B.start.y, dir: B.start.dir, vx: 0, vy: 0, peak: B.start.y, t: 0, air: 0, bt: 0, qp: false, hoops: new Set(), out: null };
+}
+function bmxFly(s, vx, vy, x) { s.mode = 'fly'; s.vx = vx; s.vy = vy; s.x = x; s.y = s.gy; s.peak = s.y; s.air = 0; }
+function bmxEnd(s, out) { s.mode = 'done'; s.out = out; }
+// Advance the rider by dt. Returns what happened (usually nothing).
+function bmxStep(W, s, dt) {
+  const B = W.B, L = W.level, ev = [];
+  s.t += dt;
+  if (s.t > 45 && s.mode !== 'done') { bmxEnd(s, { kind: 'bored', x: s.x, y: s.y }); ev.push({ what: 'bored', x: s.x, y: s.y }); return ev; }
+  if (s.mode === 'ride') {
+    const x0 = s.x;
+    s.x += s.dir * B.v * dt;
+    // kit on the joints he rolls over
+    const lo = Math.min(x0, s.x), hi = Math.max(x0, s.x);
+    for (let gx = Math.ceil(lo - 1e-9); gx <= hi + 1e-9; gx++) {
+      if (Math.abs(gx - x0) < 1e-9) continue;
+      const k = gx + ',' + s.gy;
+      if (W.ramps.has(k)) { bmxFly(s, s.dir * B.v, RAMP.vy, gx); ev.push({ what: 'kick', x: gx, y: s.gy }); return ev; }
+      if (W.qpipes.has(k)) { bmxFly(s, 0, QPIPE.vy, gx - s.dir * 0.05); s.qp = true; ev.push({ what: 'qpipe', x: gx, y: s.gy }); return ev; }
+    }
+    const su = W.surf(s.x, s.gy);
+    const edge = s.dir > 0 ? Math.floor(s.x + 1e-9) : Math.ceil(s.x - 1e-9);
+    if (!su) { bmxFly(s, s.dir * B.v, B.hop, edge); ev.push({ what: 'launch', x: edge, y: s.gy }); return ev; }
+    if (su.trap) { W.broken.add(su.bd.id); ev.push({ what: 'trap', x: edge, y: s.gy, bd: su.bd.id }); bmxFly(s, s.dir * B.v, 0, edge); return ev; }
+    if (su.ledge && su.ledge.finish) { bmxEnd(s, { kind: 'finish', x: s.x, y: s.gy }); ev.push({ what: 'finish', x: s.x, y: s.gy }); }
+    return ev;
+  }
+  if (s.mode === 'basement') {
+    s.bt += dt;
+    if (s.bt > 1.5) {
+      const D = B.drain;
+      s.gy = L.groundAt(D.x); s.dir = Math.sign(D.vx) || s.dir;
+      bmxFly(s, D.vx, D.vy, D.x);
+      s.drained = true;
+      ev.push({ what: 'drain', x: D.x, y: s.gy });
+    }
+    return ev;
+  }
+  if (s.mode !== 'fly') return ev;
+  const y0 = s.y;
+  s.vy -= GRAV * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.air += dt;
+  s.peak = Math.max(s.peak, s.y);
+  B.hoops.forEach((h, i) => {
+    if (!s.hoops.has(i) && Math.hypot(s.x - h.x, s.y + 0.6 - h.y) < (h.r ?? 0.6)) { s.hoops.add(i); ev.push({ what: 'hoop', i, x: h.x, y: h.y, cash: h.cash }); }
+  });
+  for (const o of B.obstacles) {
+    if (s.x > o.x0 && s.x < o.x1 && s.y < o.y1 && s.y + 1.2 > o.y0) { bmxEnd(s, { kind: 'crash', why: 'obstacle', label: o.label, x: s.x, y: s.y }); ev.push({ what: 'crash', x: s.x, y: s.y }); return ev; }
+  }
+  // coming down onto a platform (he goes up through them: no ceilings in BMX)
+  if (s.vy < 0) for (const gy of W.levels) {
+    if (!(y0 >= gy - 1e-9 && s.y < gy)) continue;
+    const su = W.surf(s.x, gy);
+    if (!su) continue;
+    if (su.trap) { W.broken.add(su.bd.id); ev.push({ what: 'trap', x: s.x, y: gy, bd: su.bd.id }); continue; }
+    const drop = s.peak - gy;
+    s.y = gy; s.gy = gy;
+    if (su.ledge && su.ledge.finish) { bmxEnd(s, { kind: 'finish', x: s.x, y: gy, drop }); ev.push({ what: 'finish', x: s.x, y: gy }); return ev; }
+    if (drop > B.maxDrop + 1e-6) { bmxEnd(s, { kind: 'crash', why: 'drop', drop, x: s.x, y: gy }); ev.push({ what: 'crash', x: s.x, y: gy }); return ev; }
+    s.mode = 'ride';
+    if (s.qp) { s.dir = -s.dir; s.qp = false; }
+    ev.push({ what: 'land', x: s.x, y: gy, drop, ledge: su.ledge ? su.ledge.label : null });
+    return ev;
+  }
+  // the finish (a pool, a skip, a mat) has sides as well as a top
+  const F = B.finish;
+  if (F.kind === 'ground' && s.x >= F.x0 && s.x <= F.x1 && s.y <= F.y) {
+    const drop = s.peak - F.y;
+    if (y0 <= F.y) { bmxEnd(s, { kind: 'crash', why: 'side', x: s.x, y: s.y }); ev.push({ what: 'crash', x: s.x, y: s.y }); }
+    else if (F.maxDrop && drop > F.maxDrop + 1e-6) { bmxEnd(s, { kind: 'crash', why: 'soft', drop, x: s.x, y: F.y }); ev.push({ what: 'crash', x: s.x, y: F.y }); }
+    else { s.y = F.y; bmxEnd(s, { kind: 'finish', x: s.x, y: F.y, drop }); ev.push({ what: 'finish', x: s.x, y: F.y }); }
+    return ev;
+  }
+  const g = L.groundAt(s.x);
+  if (s.y <= g) {
+    s.y = g;
+    if (W.hatchX !== null && B.drain && Math.abs(s.x - W.hatchX) <= 0.55) { s.mode = 'basement'; s.bt = 0; s.x = W.hatchX; s.vx = 0; s.vy = 0; ev.push({ what: 'hatch', x: W.hatchX, y: g }); }
+    else { bmxEnd(s, { kind: 'crash', why: 'ground', x: s.x, y: g }); ev.push({ what: 'crash', x: s.x, y: g }); }
+  }
+  return ev;
+}
+const m1 = (x) => (Math.round(x * 10) / 10).toString();
+// The whole run, worked out in advance. Path segments break where he goes down the drain.
+function bmxPredict(sim, level, pieces) {
+  const W = bmxWorld(sim, level, pieces), B = W.B;
+  const s = bmxNew(B);
+  const su = W.surf(s.x, s.gy);
+  if (!su || su.trap) return null;
+  const segs = [[[s.x, s.y]]], evs = [];
+  let n = 0;
+  while (s.mode !== 'done' && n < 50 / BMX_DT) {
+    const e = bmxStep(W, s, BMX_DT);
+    for (const x of e) evs.push(x);
+    if (e.some(x => x.what === 'drain')) segs.push([]);
+    if (s.mode !== 'basement' && (n % 3 === 0 || e.length || s.mode === 'done')) segs[segs.length - 1].push([s.x, s.y]);
+    n++;
+  }
+  if (!s.out) s.out = { kind: 'bored', x: s.x, y: s.y };
+  return { out: s.out, segs, evs, hoops: s.hoops, B, hatchX: W.hatchX, cash: [...s.hoops].reduce((a, i) => a + (B.hoops[i].cash || 0), 0) };
+}
+// What the checklist says about the predicted run.
+function bmxSummary(P, level) {
+  const B = P.B, F = B.finish, parts = [];
+  for (const e of P.evs) {
+    if (e.what === 'kick') parts.push(`kicker at ${e.x} m`);
+    else if (e.what === 'qpipe') parts.push(`quarter pipe at ${e.x} m`);
+    else if (e.what === 'trap') parts.push(`through the trap board at ${m1(e.x)} m`);
+    else if (e.what === 'launch') parts.push(`off the end at ${m1(e.x)} m`);
+    else if (e.what === 'land') parts.push(e.ledge ? `onto the ${e.ledge}` : `lands on the ${e.y} m platform`);
+    else if (e.what === 'hatch') parts.push('down the trap door');
+    else if (e.what === 'drain') parts.push('out of the drain');
+  }
+  const o = P.out;
+  let end;
+  if (o.kind === 'finish') end = `${F.kind === 'ledge' ? 'onto' : 'into'} the ${F.label}`;
+  else if (o.kind === 'bored') end = 'round and round until he gets bored';
+  else if (o.why === 'drop') end = `lands on the ${o.y} m platform from ${m1(o.drop)} m up: too far (${B.maxDrop} m max)`;
+  else if (o.why === 'soft') end = `drops ${m1(o.drop)} m into the ${F.label}: it's only good for ${F.maxDrop} m`;
+  else if (o.why === 'obstacle') end = `straight into the ${o.label}`;
+  else if (o.why === 'side') end = `into the side of the ${F.label}`;
+  else if (B.drain && P.evs.every(e => e.what !== 'drain')) end = P.hatchX === null ? `lands at ${m1(o.x)} m, and there's no trap door` : `lands at ${m1(o.x)} m, ${m1(Math.abs(o.x - P.hatchX))} m from the trap door`;
+  else if (F.kind === 'ground') end = `lands at ${m1(o.x)} m: ${o.x < F.x0 ? 'short of' : 'past'} the ${F.label} (${m1(F.x0)}–${m1(F.x1)} m)`;
+  else end = `hits the ground at ${m1(o.x)} m`;
+  parts.push(end);
+  const s = parts.join(' → ');
+  return s[0].toUpperCase() + s.slice(1);
 }
 // Sleigh stopping distance on snowy boards.
 function sleighNeeds(E) { return E.v * E.v / (2 * E.mu * GRAV) + 0.9; }
@@ -394,7 +556,7 @@ function sleighNeeds(E) { return E.v * E.v / (2 * E.mu * GRAV) + 0.9; }
 // Checklist lines + whether the job can go ahead at all.
 function eventChecks(level, sim, pieces) {
   const E = level.event, out = [];
-  let ok = true;
+  let ok = true, bmx = null;
   if (!E) return { checks: out, ok };
   const z = level.zones[0];
   if (E.type === 'hoist') {
@@ -413,10 +575,13 @@ function eventChecks(level, sim, pieces) {
     else if (n.gx >= E.skip[0] && n.gx <= E.skip[1]) out.push([true, 'Rubble chute runs into the skip']);
     else out.push([false, `The chute misses the skip (skip is at ${E.skip[0]}–${E.skip[1]} m)`]);
   } else if (E.type === 'bmx') {
-    const f = bmxFlight(sim, level, E);
-    if (!f) { ok = false; out.push([false, `Tyler needs boards to ride out onto at ${E.start} m, ${z.y} m up`]); }
-    else if (f.land >= E.pool[0] && f.land <= E.pool[1]) out.push([true, `Tyler launches at ${f.launch} m and lands in the pool at ${f.land.toFixed(1)} m`]);
-    else out.push([false, `Tyler launches at ${f.launch} m and lands at ${f.land.toFixed(1)} m: ${f.land < E.pool[0] ? 'short of' : 'past'} the pool (${E.pool[0]}–${E.pool[1]} m)`]);
+    const P = bmxPredict(sim, level, pieces), B = bmxSpec(level);
+    bmx = P;
+    if (!P) { ok = false; out.push([false, `Tyler needs real boards to ride out onto at ${B.start.x} m, ${B.start.y} m up`]); }
+    else {
+      out.push([P.out.kind === 'finish', `Tyler: ${bmxSummary(P, level)}`]);
+      if (B.hoops.length) { const got = [...P.hoops].reduce((a, i) => a + B.hoops[i].cash, 0); out.push([P.hoops.size === B.hoops.length, `Sponsor's hoops: ${P.hoops.size} of ${B.hoops.length}${got ? ` (+£${got})` : ''}`]); }
+    }
   } else if (E.type === 'sleigh') {
     const run = boardRun(sim, z.y, z.x0 + 0.5);
     const need = sleighNeeds(E);
@@ -429,7 +594,7 @@ function eventChecks(level, sim, pieces) {
   } else if (E.type === 'launch') {
     out.push(['info', 'The astronaut climbs to the capsule, then the rocket blast hits the scaffold']);
   }
-  return { checks: out, ok };
+  return { checks: out, ok, bmx };
 }
 
 // ---------------------------------------------------------------------------
@@ -692,52 +857,78 @@ function chuteUpdate(E, ev, dt) {
 }
 
 function bmxStart(E, ev) {
-  const L = this.level, zy = L.zones[0].y;
-  const r = { who: 'tyler', style: 'tyler', name: 'Tyler', visible: true, x: E.start, y: zy, u: E.start + 0.3, state: 'appear', mode: 'walk', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1, load: null, gy: zy, bike: true };
-  this.visitors.push(r); ev.r = r; ev.v = E.v;
+  const W = bmxWorld(this.sim, this.level, this.pieces), B = W.B;
+  const s = bmxNew(B);
+  const r = { who: 'tyler', style: 'tyler', name: 'Tyler', visible: true, x: B.start.x, y: B.start.y, u: s.x, state: 'appear', mode: 'walk', face: B.start.dir, t: 0, onBoard: -1, onLadder: -1, onMember: -1, load: null, gy: B.start.y, bike: true };
+  this.visitors.push(r); ev.r = r; ev.W = W; ev.s = s; ev.acc = 0; ev.impact = 0; ev.drop = 0;
   this.builder.state = 'watch';
-  this.events.push({ type: 'bmx', what: 'appear', x: E.start, y: zy });
+  this.events.push({ type: 'bmx', what: 'appear', x: B.start.x, y: B.start.y });
 }
 function bmxUpdate(E, ev, dt) {
-  const r = ev.r, sim = this.sim, L = this.level;
-  if (r.state === 'falling' || r.state === 'flat') return;
+  const r = ev.r, s = ev.s, W = ev.W, B = W.B, sim = this.sim;
+  if (r.state === 'falling' || r.state === 'flat' || r.state === 'gone') return;
   r.t += dt;
   if (r.state === 'appear') {
-    this._placeOnBoard(r, r.gy, 85);
+    r.u = s.x;
+    const su = W.surf(s.x, s.gy);
+    if (!su || !su.bd || su.trap) { this._fall(r, 0, 0); this.fail("Tyler's start platform has gone", null, true); return; }
+    this._setLoad(r, { kind: 'board', board: su.bd.id, t: Math.max(0, Math.min(1, s.x - su.bd.x0)), mass: BMX_MASS });
+    r.onBoard = su.bd.id; r.x = s.x; r.y = sim.nodes[su.bd.a].y;
     if (r.t > 1.4) { r.state = 'ride'; r.t = 0; this.events.push({ type: 'bmx', what: 'go' }); }
-  } else if (r.state === 'ride') {
-    r.u += ev.v * dt;
-    const bd = sim.boardUnder(r.u, r.gy);
-    if (!bd || bd.broken) {
-      // off the end: fly
-      this._setLoad(r, null); r.onBoard = -1;
-      r.state = 'fly'; r.vx = ev.v; r.vy = E.hop; r.x = r.u; r.y = r.gy + 0.12; r.t = 0; r.spin = 0;
-      this.events.push({ type: 'bmx', what: 'launch', x: r.x });
-      return;
+    return;
+  }
+  if (r.state === 'finish') {
+    if (r.t > 3) { r.state = 'gone'; r.visible = false; this._eventEnd(); }
+    return;
+  }
+  ev.acc += dt;
+  while (ev.acc >= BMX_DT && s.mode !== 'done') {
+    ev.acc -= BMX_DT;
+    for (const e of bmxStep(W, s, BMX_DT)) {
+      this.events.push({ type: 'bmx', ...e, prop: B.finish.prop });
+      if (e.what === 'trap') { this._setLoad(r, null); r.onBoard = -1; const bd = sim.boards[e.bd]; if (bd && !bd.broken) sim.breakBoard(bd, 'trap'); }
+      if (e.what === 'hoop' && e.cash) this.charges.push({ what: "Sponsor's hoops", cost: -e.cash });
+      if (e.what === 'land') { ev.impact = 0.3; ev.drop = e.drop; }
+      if (e.what === 'kick') { const n = sim.nodeAt(e.x, e.y); if (n) { ev.kick = { kind: 'node', node: n.id, mass: BMX_MASS * 1.8 }; sim.loads.push(ev.kick); ev.kickT = 0.15; } }
     }
-    const bump = 1.25 + 0.2 * Math.sin(r.u * 6);
-    this._placeOnBoard(r, r.gy, 85 * bump, 60);
-  } else if (r.state === 'fly') {
-    r.vy -= GRAV * dt; r.x += r.vx * dt; r.y += r.vy * dt; r.spin += dt * 6;
-    // landing on another platform?
-    if (r.vy < 0) for (const gy of [...new Set(sim.boards.map(b => b.gy))]) {
-      if (r.y - r.vy * dt >= gy + 0.1 && r.y < gy + 0.1) {
-        const bd = sim.boardUnder(r.x, gy);
-        if (bd && !bd.broken) { r.gy = gy; r.u = r.x; r.state = 'ride'; r.t = 0; this.events.push({ type: 'bmx', what: 'land', x: r.x }); return; }
-      }
-    }
-    const g = L.groundAt(r.x);
-    if (r.y <= g) {
-      r.y = g;
-      if (r.x >= E.pool[0] && r.x <= E.pool[1]) { r.state = 'splash'; r.t = 0; r.visible = true; this.events.push({ type: 'bmx', what: 'splash', x: r.x }); }
-      else {
-        r.state = 'flat'; this.events.push({ type: 'bmx', what: 'crash', x: r.x });
-        const d = r.x < E.pool[0] ? E.pool[0] - r.x : r.x - E.pool[1];
-        this.fail(`Tyler missed the paddling pool by ${d.toFixed(1)} m. He's fine. His mum isn't.`, null, true);
-      }
-    }
-  } else if (r.state === 'splash') {
-    if (r.t > 2.5) { r.state = 'gone'; r.visible = false; this._eventEnd(); }
+    if (s.mode === 'done') break;
+  }
+  if (ev.kick && (ev.kickT -= dt) <= 0) { this._removeLoad(ev.kick); ev.kick = null; }
+  r.face = s.mode === 'fly' && s.vx ? Math.sign(s.vx) : s.dir;
+  if (s.mode === 'ride') {
+    r.state = 'ride'; r.visible = true;
+    const su = W.surf(s.x, s.gy);
+    if (!su || su.ledge || su.trap) { this._setLoad(r, null); r.onBoard = -1; r.x = s.x; r.y = s.gy; return; }
+    // sit on the board the rider model is using (never a trap board he's about to find out about)
+    r.u = s.x;
+    ev.impact = Math.max(0, ev.impact - dt);
+    const bump = 1.25 + 0.2 * Math.sin(s.x * 6) + (ev.impact > 0 ? (1.3 + 0.5 * ev.drop) * ev.impact / 0.3 : 0);
+    const bd = su.bd, na = sim.nodes[bd.a], nb = sim.nodes[bd.b], t = Math.max(0, Math.min(1, s.x - bd.x0));
+    r.x = na.x + (nb.x - na.x) * t; r.y = na.y + (nb.y - na.y) * t; r.zy = s.gy;
+    r.onBoard = bd.id; r.onLadder = -1; r.onMember = -1;
+    this._setLoad(r, { kind: 'board', board: bd.id, t, mass: BMX_MASS * bump, fx: 60 * s.dir });
+  } else if (s.mode === 'fly') {
+    if (r.onBoard >= 0 || r.load) { this._setLoad(r, null); r.onBoard = -1; }
+    r.state = 'fly'; r.visible = true; r.x = s.x; r.y = s.y; r.vy = s.vy;
+  } else if (s.mode === 'basement') {
+    r.state = 'basement'; r.visible = false; r.x = s.x; r.y = s.y;
+  } else if (s.mode === 'done') {
+    const o = s.out;
+    r.x = s.x; r.y = s.y; r.visible = true;
+    if (o.kind === 'finish') { r.state = 'finish'; r.onLedge = B.finish.kind === 'ledge'; r.t = 0; this._setLoad(r, null); r.onBoard = -1; return; }
+    const F = B.finish;
+    let msg;
+    if (o.kind === 'bored') msg = 'Tyler went round in circles until he got bored and went home.';
+    else if (o.why === 'drop') msg = `Tyler dropped ${(Math.round(o.drop * 10) / 10)} m onto the ${o.y} m platform. He's fine. The bike isn't.`;
+    else if (o.why === 'soft') msg = `Tyler dropped ${(Math.round(o.drop * 10) / 10)} m into the ${F.label}, and it's only good for ${F.maxDrop} m. He's fine. His mum isn't.`;
+    else if (o.why === 'obstacle') msg = `Tyler rode straight into the ${o.label}. He's fine. The ${o.label} isn't.`;
+    else if (o.why === 'side') msg = `Tyler hit the side of the ${F.label}. He's fine. His mum isn't.`;
+    else if (B.drain && !s.drained) msg = W.hatchX === null ? "Tyler came down on the pavement: there was no trap door. He's fine. His mum isn't." : `Tyler missed the trap door by ${Math.abs(o.x - W.hatchX).toFixed(1)} m. He's fine. His mum isn't.`;
+    else if (F.kind === 'ground') { const d = o.x < F.x0 ? F.x0 - o.x : o.x - F.x1; msg = `Tyler missed the ${F.label} by ${d.toFixed(1)} m. He's fine. His mum isn't.`; }
+    else msg = `Tyler never made the ${F.label}. He's fine. His mum isn't.`;
+    if (o.kind === 'bored') { r.state = 'gone'; r.visible = false; }
+    else this._fall(r, (s.vx || 0) * 0.5, 1.5);
+    this.fail(msg, null, true);
   }
 }
 
@@ -1001,7 +1192,10 @@ function prepLevel(def) {
   };
   L.evType = L.event ? L.event.type : null;
   L.toolWheel = L.evType === 'hoist'; L.toolZip = L.evType === 'zip'; L.toolChute = L.evType === 'chute';
-  L.toolHatch = !!L.monster && L.monster !== 'hide';
+  const E = L.event || {};
+  L.toolHatch = (!!L.monster && L.monster !== 'hide') || !!E.hatch;
+  L.toolRamp = !!E.ramps; L.toolQpipe = !!E.qpipes;
+  L.toolTrap = L.chavs > 0 || !!E.traps;
   L.canBase = (gx) => !L.noBase.some(([a, b]) => gx >= a && gx <= b);
   L.inForbidden = (x, y) => L.forbidden.some(f => x > f.x0 + 1e-6 && x < f.x1 - 1e-6 && y > f.y0 + 1e-6 && y < f.y1 - 1e-6);
   L.onForbiddenEdgeOrIn = (x, y) => L.forbidden.some(f => x >= f.x0 - 1e-6 && x <= f.x1 + 1e-6 && y >= f.y0 - 1e-6 && y <= f.y1 + 1e-6 && !(Math.abs(y - f.y0) < 1e-6 && f.y0 <= L.groundCol(x)));
@@ -1031,6 +1225,8 @@ function pieceCost(p) {
   if (p.type === 'wheel') return 45;
   if (p.type === 'zip') return 60;
   if (p.type === 'chute') return 40;
+  if (p.type === 'ramp') return RAMP.cost;
+  if (p.type === 'qpipe') return QPIPE.cost;
   return 0;
 }
 function baseCostFor(p) { return 0; }
@@ -1684,6 +1880,16 @@ function validatePlacement(level, pieces, p) {
     if (!boardAt(x - 1, y) && !boardAt(x, y)) return 'The chute needs boards next to it';
     return null;
   }
+  if (p.type === 'ramp' || p.type === 'qpipe') {
+    if (!L[p.type === 'ramp' ? 'toolRamp' : 'toolQpipe']) return 'Not on this job';
+    const [x, y] = p.a;
+    if (!nodeSet.has(x + ',' + y)) return 'Fix it to a joint on a platform';
+    const l = boardSet.has((x - 1) + ',' + y), r = boardSet.has(x + ',' + y);
+    if (!l && !r) return 'It sits on the boards: pick a joint next to a board';
+    if (p.type === 'qpipe' && l && r) return 'A quarter pipe goes at the very end of a run of boards';
+    if (pieces.some(q => (q.type === 'ramp' || q.type === 'qpipe') && q.a[0] === x && q.a[1] === y)) return 'Already something there';
+    return null;
+  }
   if (p.type === 'hatch') {
     if (!L.toolHatch) return L.monster === 'hide' ? 'Consecrated ground: no digging' : 'Nothing down the drains on this job';
     const x = p.a[0];
@@ -1762,7 +1968,7 @@ function checkRequirements(level, pieces) {
     if (plan && plan.overloads.length) heavy.push({ delivery: i, item: d.item, carry: plan.carry, x: d.x, y: level.zones[d.zone].y, trap: plan.overloads.some(o => o.trap) });
   });
   const ev = eventChecks(level, sim, pieces);
-  return { zones, heavy, event: ev.checks, ok: zones.every(z => z.boarded && z.reachable) && ev.ok };
+  return { zones, heavy, event: ev.checks, bmx: ev.bmx, ok: zones.every(z => z.boarded && z.reachable) && ev.ok };
 }
 
 // ---------------------------------------------------------------------------
@@ -2608,12 +2814,12 @@ const LEVELS = [
   {
     id: 18, name: 'Pedal Power', client: 'Tyler (aged 12) and his mum',
     brief: "Tyler's going to ride his BMX out of the leisure centre's first-floor window at 3 m, along your platform, off the end, and into a paddling pool. His mum has agreed to this.",
-    tip: 'He comes off the end at the same speed every time, so the end of the platform decides where he lands. Check the landing spot in the checklist. No gaps, no trap boards.',
+    tip: 'He comes off the end at the same speed every time, so the end of the platform decides where he lands. The dotted pink line shows where he will go. No gaps, no trap boards.',
     W: 12, H: 5,
     house: { style: 'leisure', x0: 0.5, x1: 8.5, floors: 2, eaves: 6, brick: 'render', door: { x: 5, w: 1.8, h: 2.2, color: '#1a6fb8' }, windows: [{ x: 1.4, y: 3.3, w: 1.4, h: 1.5 }, { x: 3.6, y: 3.3, w: 3.6, h: 1.5 }, { x: 1.4, y: 0.6, w: 3, h: 1.6 }], roof: 'flat', sign: 'LEISURE CENTRE' },
     zones: [{ x0: 2, x1: 8, y: 3, label: 'BMX track' }],
     deliveries: [{ item: 'hod', zone: 0, x: 5 }],
-    event: { type: 'bmx', start: 2, pool: [16.2, 17.8], v: 6, hop: 1 },
+    event: { type: 'bmx', start: 2, v: 6, hop: 1, finish: { kind: 'ground', x0: 15.6, x1: 16.9, y: 0.25, prop: 'pool', label: 'paddling pool' } },
     budget: 1210, chavs: 2, startX: 11,
   },
   {
@@ -2686,6 +2892,81 @@ const LEVELS = [
     event: { type: 'launch', capsuleX: 3.3, blast: 280 },
     maxTies: 0, wind: 6, gust: 6, heavy: true, deck: true,
     budget: 4230, chavs: 0, startX: 14,
+  },
+  // ------------------------------------------------------------ bonus: Tyler's stunt tour
+  {
+    id: 25, bonus: true, name: 'Skip Jump', client: 'Tyler, at Tube & Clamp Supplies',
+    brief: "Tyler's back. The builders' merchant has said he can ride out of the loading door at 3 m, over two parked vans and into a skip full of old mattresses. He'll need a kicker ramp to get the height.",
+    tip: 'A kicker throws him up and on: about 8 m further along he comes down into the skip. Fix it to a joint on the boards and watch the dotted line move.',
+    W: 12, H: 5,
+    house: { style: 'yard', x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'yellow', door: { x: 5.2, w: 2.6, h: 2.7, color: '#4a5866' }, windows: [{ x: 0.9, y: 3.15, w: 1.3, h: 2.0 }, { x: 3.2, y: 3.6, w: 1.4, h: 1.3 }, { x: 6.6, y: 3.6, w: 1.4, h: 1.3 }, { x: 1.4, y: 0.9, w: 1.4, h: 1.3 }], roof: 'flat', sign: 'TUBE & CLAMP SUPPLIES' },
+    zones: [{ x0: 1, x1: 5, y: 3, label: 'Run-up' }],
+    deliveries: [],
+    event: {
+      type: 'bmx', start: { x: 1.4, y: 3, dir: 1 }, v: 6, hop: 0.8, ramps: true,
+      obstacles: [{ x0: 12.6, x1: 14.6, y0: 0, y1: 2.1, label: 'van', prop: 'van' }, { x0: 14.9, x1: 16.9, y0: 0, y1: 2.1, label: 'other van', prop: 'van' }],
+      finish: { kind: 'ground', x0: 17.4, x1: 20, y: 1.2, prop: 'skip', label: 'skip of mattresses' },
+    },
+    budget: 1240, chavs: 1, startX: 11,
+  },
+  {
+    id: 26, bonus: true, name: 'Down the Drain', client: 'Tyler, 3 Gasworks Row',
+    brief: "The paddling pool is in the park, and the park wall is 7 m high. Tyler's plan: ride off your platform at 4 m, straight down a trap door, through the secret basement and out of the storm drain on the far side of the wall.",
+    tip: 'Tyler has to land on the trap door. Where he comes down depends on where the boards end, or where a trap board gives way under him. Then the drain does the rest.',
+    W: 12, H: 6,
+    house: { style: 'terrace', x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'red', door: { x: 7.4, w: 1, h: 2.1, color: '#2b5f8a' }, windows: [{ x: 0.9, y: 4.1, w: 1.3, h: 1.4 }, win(3.5, 1, 1.3), win(6.5, 1, 1.3), win(1.2, 0, 1.3), win(4.4, 0, 1.3)], roof: 'gable', chimney: 5 },
+    zones: [{ x0: 1, x1: 4, y: 4, label: 'Take-off' }],
+    deliveries: [],
+    event: {
+      type: 'bmx', start: { x: 1.4, y: 4, dir: 1 }, v: 6, hop: 0.8, hatch: true, traps: true,
+      drain: { x: 15.2, vx: 2.6, vy: 7.5 },
+      obstacles: [{ x0: 13, x1: 13.9, y0: 0, y1: 7, label: 'park wall', prop: 'wall' }],
+      finish: { kind: 'ground', x0: 17.4, x1: 19.6, y: 0.25, prop: 'pool', label: 'paddling pool' },
+    },
+    budget: 660, chavs: 0, startX: 7,
+  },
+  {
+    id: 27, bonus: true, name: 'Up the Spire', client: 'Tyler, and a very nervous vicar',
+    brief: "Tyler wants to ring the bell. He rides out of the clerestory window at 5 m, and has to finish on the belfry balcony at 8 m, up the tower. A kicker only gets him 1 m higher. Quarter pipes send him straight up and back the way he came.",
+    tip: 'A quarter pipe at the end of a platform pops him up: if there are boards over it 1 m higher, he lands on them going the other way. Zig-zag up, then kick across to the balcony.',
+    W: 12, H: 8,
+    house: { style: 'church', x0: 0.5, x1: 11.5, floors: 1, eaves: 8, brick: 'stone', door: { x: 6, w: 1.3, h: 2.8, color: '#4a2d18', arch: true }, windows: [{ x: 1.6, y: 1.2, w: 0.9, h: 2.8, kind: 'lancet' }, { x: 4.0, y: 1.2, w: 0.9, h: 2.8, kind: 'lancet' }, { x: 9.0, y: 1.2, w: 0.9, h: 2.8, kind: 'lancet' }, { x: 3.0, y: 5.2, w: 0.8, h: 2.0, kind: 'lancet' }, { x: 6.2, y: 5.2, w: 0.8, h: 2.0, kind: 'lancet' }, { x: 9.9, y: 5.1, w: 0.9, h: 2.2, kind: 'lancet' }], roof: 'gable' },
+    zones: [{ x0: 6, x1: 10, y: 5, label: 'Clerestory' }],
+    deliveries: [],
+    event: {
+      type: 'bmx', start: { x: 10.4, y: 5, dir: -1 }, v: 6, hop: 0.8, ramps: true, qpipes: true,
+      finish: { kind: 'ledge', x0: -3.4, x1: -0.4, y: 8, prop: 'balcony', label: 'belfry balcony' },
+    },
+    budget: 2510, chavs: 0, startX: 13,
+  },
+  {
+    id: 28, bonus: true, name: 'Hoop Dreams', client: 'Tyler, sponsored by FIZZ Cola',
+    brief: "Tyler's got a sponsor. FIZZ Cola pay for every hoop he goes through, and the fire hoop pays double. He rides out of the leisure centre at 3 m and has to end up in the stunt airbag round the side.",
+    tip: "The airbag is on the left and Tyler sets off to the right, so he needs turning round: a quarter pipe at the end of the boards does that. Hoop money comes off the bill.",
+    W: 12, H: 6,
+    house: { style: 'leisure', x0: 0.5, x1: 9.5, floors: 2, eaves: 6, brick: 'render', door: { x: 5.2, w: 1.8, h: 2.2, color: '#1a6fb8' }, windows: [{ x: 0.9, y: 3.3, w: 1.4, h: 1.5 }, { x: 3.4, y: 3.3, w: 4.6, h: 1.5 }, { x: 1.4, y: 0.6, w: 3, h: 1.6 }], roof: 'flat', sign: 'LEISURE CENTRE' },
+    zones: [{ x0: 1, x1: 5, y: 3, label: 'Run-up' }],
+    deliveries: [],
+    event: {
+      type: 'bmx', start: { x: 1.4, y: 3, dir: 1 }, v: 6, hop: 0.8, ramps: true, qpipes: true,
+      hoops: [{ x: 6, y: 4.9, cash: 150 }, { x: 11, y: 5.1, cash: 150 }, { x: -2.5, y: 4.0, cash: 300, fire: true }],
+      finish: { kind: 'ground', x0: -5.6, x1: -2.6, y: 0.9, prop: 'airbag', label: 'stunt airbag', maxDrop: 5 },
+    },
+    budget: 760, chavs: 1, startX: 12,
+  },
+  {
+    id: 29, bonus: true, name: 'Drop Zone', client: 'Tyler, Floor 3, Canary Row',
+    brief: "Tyler's last stunt: out of the office window at 9 m and down into the crash mat. He can drop 3½ m onto boards and the mat is good for 4 m, so he'll have to come down a level at a time.",
+    tip: 'Trap boards give way under him and he drops to the boards below, still going. Quarter pipes turn him round. The run-up at 9 m has to be real boards.',
+    W: 12, H: 10,
+    house: { style: 'tower', x0: 0.5, x1: 9.5, floors: 9, eaves: 30, brick: 'render', door: { x: 4, w: 2, h: 2.4, color: '#1c2630' }, windows: [], roof: 'flat', tieRows: [3, 6, 9] },
+    zones: [{ x0: 2, x1: 6, y: 9, label: 'Office window' }],
+    deliveries: [],
+    event: {
+      type: 'bmx', start: { x: 2.4, y: 9, dir: 1 }, v: 6, hop: 0.8, traps: true, qpipes: true, ramps: true,
+      finish: { kind: 'ground', x0: 15.2, x1: 17.8, y: 0.5, prop: 'mat', label: 'crash mat', maxDrop: 4 },
+    },
+    budget: 3660, chavs: 0, startX: 13,
   },
 ];
 
@@ -3231,10 +3512,10 @@ function syncHatches(L, pieces) {
   for (const h of hatchViews) h.g.parent && h.g.parent.remove(h.g);
   hatchViews = [];
   if (manhole) { manhole.g.parent && manhole.g.parent.remove(manhole.g); manhole = null; }
-  if (!L.monster) return;
+  if (!L.monster && !L.toolHatch) return;
   for (const p of pieces.filter(q => q.type === 'hatch')) {
     const x = p.a[0], y = L.groundAt(x);
-    const g = new THREE.Group(); g.position.set(x, y, HATCH_Z);
+    const g = new THREE.Group(); g.position.set(x, y, L.monster ? HATCH_Z : Z_MID);
     const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.0), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.012; hole.visible = false; g.add(hole);
     const glow = new THREE.PointLight(0xb04dff, 0, 6); glow.position.y = 0.4; g.add(glow);
     const hinge = new THREE.Group(); hinge.position.set(0, 0.03, -0.55); g.add(hinge);   // hinged on the house side
@@ -3244,6 +3525,7 @@ function syncHatches(L, pieces) {
     levelGroup.add(g);
     hatchViews.push({ g, hinge, hole, glow, x, open: 0, target: 0, glowT: 0 });
   }
+  if (!L.monster) return;
   const mx = MONSTER_X, my = L.groundAt(0);
   const g = new THREE.Group(); g.position.set(mx, my, HATCH_Z);
   const hole = new THREE.Mesh(new THREE.CircleGeometry(0.62, 24), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.01; g.add(hole);
@@ -3251,6 +3533,21 @@ function syncHatches(L, pieces) {
   levelGroup.add(g);
   manhole = { g, cover, open: 0 };
 }
+// BMX kit: a kicker (a little funbox, ramped both ways) and a quarter pipe.
+const bmxKit = [];
+const plyMatK = new THREE.MeshStandardMaterial({ color: 0xd9b27a, roughness: 0.75, map: woodTex, side: THREE.DoubleSide });
+const kickerGeo = (() => {
+  const sh = new THREE.Shape(); sh.moveTo(-0.55, 0); sh.lineTo(0.55, 0); sh.lineTo(0.15, 0.32); sh.lineTo(-0.15, 0.32); sh.lineTo(-0.55, 0);
+  return new THREE.ExtrudeGeometry(sh, { depth: Z_OUT - Z_IN + 0.1, bevelEnabled: false });
+})();
+const qpipeGeo = (() => {
+  // concave face towards +x (the boards); the lip is at x = 0, over the joint
+  const R = 0.85, sh = new THREE.Shape();
+  sh.moveTo(-0.12, 0); sh.lineTo(R, 0);
+  for (let i = 1; i <= 12; i++) { const a = i / 12 * Math.PI / 2; sh.lineTo(R - R * Math.sin(a), R - R * Math.cos(a)); }
+  sh.lineTo(-0.12, R); sh.lineTo(-0.12, 0);
+  return new THREE.ExtrudeGeometry(sh, { depth: Z_OUT - Z_IN + 0.1, bevelEnabled: false, curveSegments: 12 });
+})();
 // Gin wheel, zip wire anchor and rubble chute, as placed in the design.
 const eventPieces = { wheel: null, cable: null, chute: null, anchor: null };
 const orangeM = new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.6 });
@@ -3277,6 +3574,16 @@ function syncEventPieces(L, pieces) {
     c.position.set((x0 + tx) / 2, (y0 + ty) / 2, (z0 + z1) / 2);
     c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / len, dy / len, dz / len));
     levelGroup.add(c); eventPieces.cable = c;
+  }
+  for (const k of bmxKit) k.parent && k.parent.remove(k);
+  bmxKit.length = 0;
+  if (E.type === 'bmx') for (const p of pieces.filter(q => q.type === 'ramp' || q.type === 'qpipe')) {
+    const [x, y] = p.a, dep = Z_OUT - Z_IN + 0.1;
+    const geo = p.type === 'ramp' ? kickerGeo : qpipeGeo;
+    const m = new THREE.Mesh(geo, plyMatK); m.castShadow = true; m.receiveShadow = true;
+    m.position.set(x, y + 0.13, Z_IN - 0.05);
+    if (p.type === 'qpipe') { const right = pieces.some(q => (q.type === 'board' || q.type === 'deck' || q.type === 'trap') && q.a[1] === y && Math.min(q.a[0], q.b[0]) <= x && Math.max(q.a[0], q.b[0]) > x); m.scale.x = right ? 1 : -1; }
+    levelGroup.add(m); bmxKit.push(m);
   }
   const ch = pieces.find(p => p.type === 'chute');
   if (ch && E.type === 'chute') {
@@ -3574,7 +3881,7 @@ function buildLevelScene(L) {
     { x0: L.house.x0 - 12, x1: L.house.x0 - 3.5, eaves: 6, brick: L.house.brick === 'red' ? 'yellow' : 'red', windows: [{ x: L.house.x0 - 10.5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 10.5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x0 - 5.4, w: 1, h: 2.1, color: '#355c7d' }, chimney: L.house.x0 - 9 },
     { x0: L.house.x1 + 3.5, x1: L.house.x1 + 12, eaves: 6, brick: L.house.brick === 'stone' ? 'render' : 'stone', windows: [{ x: L.house.x1 + 5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x1 + 7.2, w: 1, h: 2.1, color: '#a23b2a' }, chimney: L.house.x1 + 6 },
   ];
-  const nb = ['church', 'abbey', 'cathedral', 'rocket', 'tower'].includes(style) ? [] : style === 'leisure' || style === 'hall' ? [nbAll[0]] : nbAll;
+  const nb = ['church', 'abbey', 'cathedral', 'rocket', 'tower'].includes(style) ? [] : style === 'leisure' || style === 'hall' || (L.event && (L.event.obstacles || []).some(o => o.prop === 'wall')) ? [nbAll[0]] : nbAll;
   for (const n of nb) { const hg = buildHouse(G, { ...n, style: 'terrace' }, { snow: L.snow }); hg.position.z = -2.5; }
   buildTheme(G, L, style);
   // paved strip in front, stepped by column
@@ -3737,6 +4044,12 @@ function buildTheme(G, L, style) {
     for (const x of [1.5, L.W - 1.5]) { box(1.4, 0.06, 0.5, M.bark, x, 0.72, 3.0, G); for (const dz of [-0.45, 0.45]) box(1.4, 0.05, 0.25, M.bark, x, 0.45, 3.0 + dz, G); }
   }
   if (style === 'mill') buildMill(G, L);
+  if (style === 'yard') {
+    // racks of tube and stacks of boards by the gate
+    for (let i = 0; i < 4; i++) { const t = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 6, 8), M.steel); t.rotation.z = Math.PI / 2; t.position.set(-3.5, 0.3 + i * 0.12, 4.0 + (i % 2) * 0.1); G.add(t); }
+    for (let i = 0; i < 6; i++) box(3.9, 0.06, 0.25, M.wood, -3.2, 0.05 + i * 0.07, 5.0, G);
+    for (const [x, z] of [[-1.5, 3.6], [-0.8, 3.9]]) { box(1.2, 0.14, 1.0, M.bark, x, 0.07, z, G); box(1.0, 0.6, 0.9, texFromFacade('red', 1, 0.6), x, 0.44, z, G); }
+  }
   if (style === 'church') {
     // west tower and spire off to the left
     const tx0 = h.x0 - 4.2, tw = 3.6, th = 14;
@@ -3801,17 +4114,7 @@ function buildTheme(G, L, style) {
       for (const dx of [-0.9, 0.9]) box(0.05, 2, 0.05, M.white, dx, 1, -0.5, stall);
     }
   }
-  if (E.type === 'bmx') {
-    const [p0, p1] = E.pool;
-    const pool = new THREE.Group(); G.add(pool); pool.position.set((p0 + p1) / 2, 0, Z_MID);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry((p1 - p0) / 2, 0.22, 10, 32), new THREE.MeshStandardMaterial({ color: 0x3fa9f5, roughness: 0.4 }));
-    ring.rotation.x = Math.PI / 2; ring.position.y = 0.22; pool.add(ring);
-    const water = new THREE.Mesh(new THREE.CircleGeometry((p1 - p0) / 2 - 0.05, 32), new THREE.MeshStandardMaterial({ color: 0x6fd0ff, roughness: 0.1, transparent: true, opacity: 0.85 }));
-    water.rotation.x = -Math.PI / 2; water.position.y = 0.3; pool.add(water);
-    const duck = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffd12d })); duck.position.set(0.3, 0.38, 0.2); pool.add(duck);
-    const sgn = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), new THREE.MeshStandardMaterial({ map: labelTex('LANDING\nZONE'), roughness: 0.8 })); sgn.position.set(0, 1.1, -1.3); pool.add(sgn);
-    const post = box(0.05, 1, 0.05, M.bark, 0, 0.5, -1.32, pool);
-  }
+  if (E.type === 'bmx') buildBmxScene(G, L);
   if (E.type === 'fireworks') {
     // bonfire in the close
     const bx = -3.5;
@@ -3844,6 +4147,121 @@ function buildTheme(G, L, style) {
 //  waterwheel on its race.
 // ---------------------------------------------------------------------------
 const sceneTickers = [];
+// ---------------------------------------------------------------------------
+//  BMX jobs: the finish (pool, skip, airbag, crash mat, belfry balcony),
+//  things to hit (vans, walls), the sponsor's hoops and the storm drain.
+// ---------------------------------------------------------------------------
+const bmxProps = { hoops: [], bell: null, finish: null, drain: null };
+function buildBmxScene(G, L) {
+  const E = L.event, F = E.finish || { kind: 'ground', x0: E.pool[0], x1: E.pool[1], y: 0.25, prop: 'pool' };
+  bmxProps.hoops = []; bmxProps.bell = null; bmxProps.finish = null; bmxProps.drain = null;
+  const fw = F.x1 - F.x0, fx = (F.x0 + F.x1) / 2;
+  const post = (text, x, z) => {
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.45), new THREE.MeshStandardMaterial({ map: labelTex(text), roughness: 0.8 })); sg.position.set(x, 1.1, z); G.add(sg);
+    box(0.05, 1, 0.05, M.bark, x, 0.5, z - 0.03, G);
+  };
+  if (F.prop === 'pool') {
+    const pool = new THREE.Group(); G.add(pool); pool.position.set(fx, 0, Z_MID);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(fw / 2, 0.22, 10, 32), new THREE.MeshStandardMaterial({ color: 0x3fa9f5, roughness: 0.4 }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.22; pool.add(ring);
+    const water = new THREE.Mesh(new THREE.CircleGeometry(fw / 2 - 0.05, 32), new THREE.MeshStandardMaterial({ color: 0x6fd0ff, roughness: 0.1, transparent: true, opacity: 0.85 }));
+    water.rotation.x = -Math.PI / 2; water.position.y = 0.3; pool.add(water);
+    const duck = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffd12d })); duck.position.set(0.3, 0.38, 0.2); pool.add(duck);
+    post('LANDING\nZONE', fx, Z_MID - 1.3);
+    bmxProps.finish = pool;
+  } else if (F.prop === 'skip') {
+    const sk = new THREE.Group(); G.add(sk); sk.position.set(fx, 0, Z_MID);
+    const yel = new THREE.MeshStandardMaterial({ color: 0xf0b90b, roughness: 0.6, metalness: 0.2 });
+    const sh = new THREE.Shape(); sh.moveTo(-fw / 2 + 0.35, 0); sh.lineTo(fw / 2 - 0.35, 0); sh.lineTo(fw / 2, F.y); sh.lineTo(-fw / 2, F.y); sh.lineTo(-fw / 2 + 0.35, 0);
+    const body = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 1.7, bevelEnabled: false }), yel); body.position.z = -0.85; body.castShadow = true; sk.add(body);
+    box(fw + 0.06, 0.08, 1.76, M.dark, 0, F.y, 0, sk);
+    const matt = [0xf2efe6, 0xdfe8f2, 0xe9dccb];
+    for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(new RoundedBoxGeometry(fw * 0.42, 0.22, 1.4, 2, 0.08), new THREE.MeshStandardMaterial({ color: matt[i], roughness: 0.95 })); m.position.set(-fw * 0.25 + i * fw * 0.25, F.y + 0.05 + i * 0.06, 0); m.rotation.z = (i - 1) * 0.12; m.castShadow = true; sk.add(m); }
+    post('MIND THE\nSKIP', F.x1 + 0.8, Z_MID - 0.9);
+    bmxProps.finish = sk;
+  } else if (F.prop === 'airbag' || F.prop === 'mat') {
+    const big = F.prop === 'airbag';
+    const col = big ? 0x2a6fdb : 0x2b4fa0;
+    const m = new THREE.Mesh(new RoundedBoxGeometry(fw, F.y, big ? 3 : 2.2, 4, big ? 0.35 : 0.12), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }));
+    m.position.set(fx, F.y / 2, Z_MID); m.castShadow = true; m.receiveShadow = true; G.add(m);
+    const lab = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(fw - 0.3, 2.2), F.y * 0.6), new THREE.MeshStandardMaterial({ map: labelTex(big ? 'STUNT' : 'CRASH MAT', '#2a6fdb', '#ffffff'), roughness: 0.7, transparent: true }));
+    lab.position.set(fx, F.y / 2, Z_MID + (big ? 1.51 : 1.11)); G.add(lab);
+    if (big) for (const dx of [-fw / 2 + 0.3, fw / 2 - 0.3]) { const fan = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.3, 16), M.dark); fan.rotation.x = Math.PI / 2; fan.position.set(fx + dx, 0.3, Z_MID + 1.7); G.add(fan); }
+    bmxProps.finish = m;
+  } else if (F.prop === 'balcony') {
+    // a stone balcony round the belfry, with the bell in the louvred opening above it
+    const dressed = new THREE.MeshStandardMaterial({ color: 0xcfc6b2, roughness: 0.85 });
+    const z0 = -1.0, z1 = 1.6, zc = (z0 + z1) / 2;
+    box(fw + 0.3, 0.22, z1 - z0, dressed, fx, F.y - 0.11, zc, G);
+    for (let i = 0; i <= 8; i++) { const x = F.x0 - 0.1 + i * (fw + 0.2) / 8; box(0.07, 0.75, 0.07, dressed, x, F.y + 0.37, z1 - 0.05, G, false); }
+    box(fw + 0.3, 0.08, 0.14, dressed, fx, F.y + 0.78, z1 - 0.05, G);
+    for (const sx of [F.x0 - 0.1, F.x1 + 0.1]) box(0.14, 0.08, z1 - z0, dressed, sx, F.y + 0.78, zc, G);
+    for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 4), dressed); c.rotation.x = Math.PI; c.position.set(F.x0 + 0.3 + i * (fw - 0.6) / 2, F.y - 0.45, z1 - 0.2); G.add(c); }
+    const arch = new THREE.Mesh(new THREE.ShapeGeometry(lancetShape(1.5, 2.6)), M.dark); arch.position.set(fx, F.y + 1.0, -0.98); G.add(arch);
+    const bellG = new THREE.Group(); bellG.position.set(fx, F.y + 3.2, -0.6); G.add(bellG);
+    const prof = [[0, 0], [0.42, 0], [0.45, 0.06], [0.36, 0.25], [0.26, 0.7], [0.24, 0.9], [0.1, 0.98], [0, 1]].map(([x, y]) => new THREE.Vector2(x, -y));
+    const bell = new THREE.Mesh(new THREE.LatheGeometry(prof.reverse(), 24), M.brass); bell.position.y = -0.05; bell.rotation.x = Math.PI; bell.position.y = -1.0;
+    const bell2 = new THREE.Group(); bell2.add(bell); bellG.add(bell2);
+    box(1.2, 0.12, 0.12, M.bark, 0, 0.05, 0, bellG);
+    bmxProps.bell = { g: bell2, ring: 0 };
+    sceneTickers.push((dt) => { const b = bmxProps.bell; if (!b) return; b.ring = Math.max(0, b.ring - dt * 0.12); b.g.rotation.z = Math.sin(performance.now() / 260) * 0.9 * b.ring; });
+    bmxProps.finish = bellG;
+  }
+  // things in the way
+  const vanCols = [0xf4f2ec, 0x2f6fb8, 0xc0392b];
+  (E.obstacles || []).forEach((o, i) => {
+    const w = o.x1 - o.x0, cx = (o.x0 + o.x1) / 2;
+    if (o.prop === 'van') {
+      const v = new THREE.Group(); G.add(v); v.position.set(cx, 0, Z_MID);
+      const paint = new THREE.MeshPhysicalMaterial({ color: vanCols[i % 3], roughness: 0.35, clearcoat: 0.6 });
+      const body = new THREE.Mesh(new RoundedBoxGeometry(w, o.y1 - 0.35, 1.8, 3, 0.12), paint); body.position.y = 0.35 + (o.y1 - 0.35) / 2; body.castShadow = true; v.add(body);
+      const ws = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 1.5), M.glass); ws.position.set(w / 2 + 0.01, o.y1 - 0.55, 0); v.add(ws);
+      for (const dx of [-w / 2 + 0.45, w / 2 - 0.45]) for (const dz of [-0.85, 0.85]) { const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.22, 16), M.dark); wh.rotation.x = Math.PI / 2; wh.position.set(dx, 0.33, dz); v.add(wh); }
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.7, 0.4), new THREE.MeshStandardMaterial({ map: labelTex(['TUBE & CLAMP', 'PLUMBING', 'DAVE & SON'][i % 3]), roughness: 0.6 })); sg.position.set(0, o.y1 * 0.55, 0.91); v.add(sg);
+    } else if (o.prop === 'wall') {
+      const d = 11, zc = 3.3 - d / 2, tm = texFromFacade('red', d, o.y1), tf = texFromFacade('red', w, o.y1);
+      box(w, o.y1, d, [tm, tm, M.sill, M.sill, tf, tf], cx, o.y1 / 2, zc, G);
+      box(w + 0.2, 0.16, d + 0.1, M.sill, cx, o.y1 + 0.08, zc, G);
+      for (let z = zc - d / 2 + 1; z < zc + d / 2; z += 2.5) box(w + 0.25, o.y1 * 0.92, 0.5, tf, cx, o.y1 * 0.46, z, G);
+      const ps = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.5), new THREE.MeshStandardMaterial({ map: labelTex('MEMORIAL\nPARK', '#2f5d3a', '#ffffff'), roughness: 0.7 })); ps.position.set(cx, 2.6, zc + d / 2 + 0.27); G.add(ps);
+      // the park beyond
+      for (const [x, z, s2] of [[o.x1 + 2, -3, 1.2], [o.x1 + 6.5, -4, 1.5], [o.x1 + 4, 5, 1]]) { const t = new THREE.Mesh(new THREE.IcosahedronGeometry(1.3 * s2, 1), M.leaf); t.position.set(x, 2.6 * s2, z); t.castShadow = true; G.add(t); box(0.25, 2 * s2, 0.25, M.bark, x, s2, z, G); }
+      const gr = new THREE.Mesh(new THREE.PlaneGeometry(14, 16), new THREE.MeshStandardMaterial({ color: 0x6f9a45, roughness: 1 })); gr.rotation.x = -Math.PI / 2; gr.position.set(o.x1 + 7, 0.015, Z_MID - 3); gr.receiveShadow = true; G.add(gr);
+    }
+  });
+  // the sponsor's hoops, on poles
+  (E.hoops || []).forEach((h, i) => {
+    const g = new THREE.Group(); g.position.set(h.x, h.y, Z_MID); G.add(g);
+    const r = h.r ?? 0.6;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 0.06, 10, 36), new THREE.MeshStandardMaterial({ color: h.fire ? 0x3a3d42 : 0xff2d8a, roughness: 0.4, metalness: h.fire ? 0.7 : 0.1, emissive: h.fire ? 0x000000 : 0x550022 }));
+    ring.rotation.y = 1.0; g.add(ring);
+    box(0.06, h.y - r, 0.06, M.iron, h.x, (h.y - r) / 2, Z_MID - 0.5, G);
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.3), new THREE.MeshStandardMaterial({ map: labelTex(`FIZZ £${h.cash}`, '#ff2d8a', '#ffffff'), roughness: 0.6 })); tag.position.set(0, -r - 0.3, -0.45); g.add(tag);
+    const flames = [];
+    if (h.fire) for (let k = 0; k < 10; k++) {
+      const a = k / 10 * Math.PI * 2;
+      const f = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 6), new THREE.MeshBasicMaterial({ color: k % 2 ? 0xff7a1a : 0xffd12d, transparent: true, opacity: 0.9 }));
+      f.position.set(Math.cos(a) * r * Math.cos(1.0), Math.sin(a) * r + 0.12, -Math.cos(a) * r * Math.sin(1.0)); g.add(f); flames.push(f);
+    }
+    const hv = { g, ring, flames, got: 0 };
+    bmxProps.hoops[i] = hv;
+    sceneTickers.push((dt) => {
+      const t = performance.now() / 1000;
+      for (const [k, f] of flames.entries()) f.scale.y = 1 + Math.sin(t * 17 + k * 1.7) * 0.35;
+      if (hv.got > 0) { hv.got = Math.max(0, hv.got - dt); ring.rotation.z += dt * 14 * hv.got; g.scale.setScalar(1 + 0.25 * Math.sin(hv.got * 12) * hv.got); }
+    });
+  });
+  // the storm drain he shoots out of
+  if (E.drain) {
+    const D = E.drain, gy = L.groundAt(D.x);
+    const g = new THREE.Group(); g.position.set(D.x, gy, Z_MID); G.add(g);
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.55, 24), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.012; g.add(hole);
+    for (let k = -2; k <= 2; k++) box(0.06, 0.04, 1.0, ironMat, k * 0.18, 0.03, 0, g, false);
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), new THREE.MeshStandardMaterial({ map: labelTex('STORM\nDRAIN'), roughness: 0.8 })); sg.position.set(0.9, 0.9, -1.2); g.add(sg);
+    box(0.05, 0.7, 0.05, M.bark, 0.9, 0.35, -1.23, g);
+    bmxProps.drain = g;
+  }
+}
 function sceneryTick(dt) { for (const f of sceneTickers) f(dt); }
 function buildMill(G, L) {
   const h = L.house, w = h.x1 - h.x0, cx = (h.x0 + h.x1) / 2, ld = h.loadingDoors;
@@ -4324,7 +4742,7 @@ function animatePerson(g, p, dt, t) {
   const moving = Math.hypot(p.x - A.lastX, p.y - A.lastY, pz - (A.lastZ ?? pz)) / Math.max(dt, 1e-4);
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
   const riding = p.bike && (p.state === 'appear' || p.state === 'ride' || p.state === 'fly');
-  const st = p.dance ? 'dance' : (p.state === 'zip' || p.state === 'swinghang') ? 'hang' : riding ? 'ride' : p.state;
+  const st = p.dance ? 'dance' : (p.state === 'zip' || p.state === 'swinghang') ? 'hang' : riding ? 'ride' : p.state === 'finish' ? 'waving' : p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
   const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride', 'dance'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
@@ -4337,7 +4755,8 @@ function animatePerson(g, p, dt, t) {
   if (mode === 'bounce') { y = p.y + 0.125 + (p.hop || 0) * 0.35; zT = Z_MID; yawT = Math.sin(t * 3) * 0.6; }
   if (mode === 'hang') { zT = Z_OUT + 0.3; yawT = Math.PI; }
   if (mode === 'haul') { yawT = Math.PI; }
-  if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52; yawT = Math.PI / 2; }
+  if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52 + (p.state === 'fly' ? 0 : 0.11); yawT = p.face < 0 ? -Math.PI / 2 : Math.PI / 2; }
+  if (p.state === 'finish') { zT = Z_MID + 0.2; y = p.y + (p.onLedge ? 0.02 : 0.11); }
   let move = 0;
   if (mode === 'dance') {
     move = ((p.id || 0) * 7 + Math.floor(((p.beat || t * 12) / (2 * Math.PI)) / 8)) % 6;
@@ -5355,11 +5774,16 @@ function eventView(tr, L, dt, t) {
         eventPieces.chute.position.set(n.x - eventPieces.chute.userData.x, n.y - eventPieces.chute.userData.y, 0);
       }
     }
-    if (E.type === 'bmx' && ev.r && ev.r.visible && ev.r.state !== 'flat' && ev.r.state !== 'gone') {
-      const r = ev.r;
+    if (E.type === 'bmx' && ev.r && ev.r.visible && ev.r.state !== 'flat' && ev.r.state !== 'gone' && ev.r.state !== 'falling') {
+      const r = ev.r, s = ev.s;
       bike.visible = true;
-      bike.position.set(r.x, r.y, Z_MID);
-      bike.rotation.set(0, 0, r.state === 'fly' ? Math.max(-0.5, Math.min(0.35, (r.vy || 0) * 0.08)) : 0);
+      if (r.state === 'finish') { bike.position.set(r.x + 0.55, r.y + 0.02, Z_MID - 0.2); bike.rotation.set(0, 0.6, 0.15); }
+      else {
+        const fly = r.state === 'fly';
+        bike.position.set(r.x, r.y + (fly ? 0 : 0.11), Z_MID);
+        const pitch = !fly ? 0 : s && s.vx === 0 ? Math.sign(r.vy || 0) * 1.25 : Math.max(-0.5, Math.min(0.35, (r.vy || 0) * 0.08));
+        bike.rotation.set(0, r.face < 0 ? Math.PI : 0, pitch);
+      }
     }
     if (E.type === 'sleigh' && ev.s && ev.s.state !== 'gone') {
       const s = ev.s;
@@ -5623,7 +6047,8 @@ const save = (() => {
 // Dev shortcut: add ?dev or #dev to the URL (e.g. .../cowboy-scaffolders/?dev#job20) to open every job.
 // Nothing is saved, so progress is untouched once you drop it from the URL.
 const DEV = /[?#&]dev\b/i.test(location.search + location.hash);
-const unlocked = (i) => DEV || i === 0 || (save.d.stars[LEVELS[i - 1].id] || 0) > 0 || (save.d.stars[LEVELS[i].id] || 0) > 0;
+const BONUS_AFTER = 18;   // Tyler's stunt tour opens once Pedal Power is done
+const unlocked = (i) => DEV || i === 0 || (LEVELS[i].bonus ? (save.d.stars[BONUS_AFTER] || 0) > 0 : (save.d.stars[LEVELS[i - 1].id] || 0) > 0) || (save.d.stars[LEVELS[i].id] || 0) > 0;
 
 const $ = (id) => document.getElementById(id);
 const glz = () => (S.L && S.L.glazier) || GLAZIER;
@@ -5648,6 +6073,8 @@ const ICON = {
   wheel: '<svg viewBox="0 0 34 34"><circle cx="17" cy="12" r="7" fill="none" stroke="#dfe4e8" stroke-width="3"/><path d="M17 5v14M10 12h14" stroke="#dfe4e8" stroke-width="1.4"/><path d="M11 13v16M23 13v10" stroke="#c8b48a" stroke-width="2"/><rect x="18" y="23" width="10" height="7" rx="1" fill="#b6b2a8"/></svg>',
   zip: '<svg viewBox="0 0 34 34"><rect x="3" y="6" width="7" height="7" fill="#ff7a1a"/><path d="M8 9 L31 24" stroke="#dfe4e8" stroke-width="2"/><circle cx="20" cy="17" r="2.5" fill="#f3d40b"/><path d="M20 19v7M17 22h6" stroke="#f3d40b" stroke-width="2"/></svg>',
   chute: '<svg viewBox="0 0 34 34"><path d="M8 4h8l-2 8h-5zM9 12h6l-2 8h-5zM10 20h6l-2 8h-5z" fill="#ff7a1a"/><rect x="16" y="24" width="15" height="7" rx="1" fill="#f0b90b"/></svg>',
+  ramp: '<svg viewBox="0 0 34 34"><path d="M3 27h28l-8-10h-12z" fill="#d9b27a"/><path d="M3 27l8-10h12l8 10" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M8 13q9-12 18 0" fill="none" stroke="#ff2d8a" stroke-width="2" stroke-dasharray="3 2"/></svg>',
+  qpipe: '<svg viewBox="0 0 34 34"><path d="M4 29h26V7h-3q0 19-23 19z" fill="#d9b27a"/><path d="M27 7q0 19-23 19" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M22 18V4M22 4l-3 4M22 4l3 4" stroke="#ff2d8a" stroke-width="2" fill="none" stroke-linecap="round"/></svg>',
   protect: '<svg viewBox="0 0 34 34"><rect x="6" y="5" width="22" height="24" fill="#2a3440" stroke="#f6f5f0" stroke-width="2"/><rect x="4" y="8" width="26" height="18" rx="1" fill="#d9b27a" transform="rotate(-8 17 17)"/><g fill="#6b4e2e"><circle cx="8" cy="12" r="1.2"/><circle cx="27" cy="9" r="1.2"/><circle cx="8" cy="26" r="1.2"/><circle cx="28" cy="23" r="1.2"/></g></svg>',
   order: '<svg viewBox="0 0 34 34"><circle cx="9" cy="9" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="9" y="12.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">1</text><circle cx="25" cy="25" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="25" y="28.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">2</text><path d="M13 13l8 8" stroke="#f3d40b" stroke-width="2.2" stroke-linecap="round"/><path d="M21 16v5h-5" stroke="#f3d40b" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
 };
@@ -5658,11 +6085,13 @@ const TOOLS = [
   { id: 'deck', name: 'Steel deck', price: `£${BOARDS.deck.cost}/m · ${BOARDS.deck.cap} kg`, key: '4', req: 'deck' },
   { id: 'ladder', name: 'Ladder', price: `£${LADDER.cost}/m · up to ${LADDER.maxLen} m`, key: '5' },
   { id: 'lock', name: 'Ladder lock', price: `£${LOCK.cost} · keeps chavs off`, key: '6', req: 'chavs' },
-  { id: 'trap', name: 'Trap board', price: `£${BOARDS.trap.cost}/m · gives way under anyone`, key: 't', req: 'chavs' },
+  { id: 'trap', name: 'Trap board', price: `£${BOARDS.trap.cost}/m · gives way under anyone`, key: 't', req: 'toolTrap' },
   { id: 'hatch', name: 'Trap door', price: `£${HATCH.cost} · for the Drain Gobbler`, key: 'h', req: 'toolHatch' },
   { id: 'wheel', name: 'Gin wheel', price: '£45 · haul loads up on a rope', key: 'g', req: 'toolWheel' },
   { id: 'zip', name: 'Zip anchor', price: '£60 · where the wire starts', key: 'z', req: 'toolZip' },
   { id: 'chute', name: 'Rubble chute', price: '£40 · hangs off a board end', key: 'c', req: 'toolChute' },
+  { id: 'ramp', name: 'Kicker', price: `£${RAMP.cost} · throws Tyler up and on`, key: 'k', req: 'toolRamp' },
+  { id: 'qpipe', name: 'Quarter pipe', price: `£${QPIPE.cost} · up, and back the way he came`, key: 'p', req: 'toolQpipe' },
   { id: 'protect', name: 'Board up', price: `£${BOARDUP.cost} a window · glazier £${glz()}`, key: '0' },
   { id: 'tie', name: 'Wall tie', price: `£${TIE.cost} each`, key: '7' },
   { id: 'order', name: 'Build order', price: 'Click pieces in order', key: '8' },
@@ -5680,6 +6109,8 @@ const NEW_KIT = {
   wheel: `A <b>gin wheel</b> (£45) for hauling loads up on a rope. Fit it to a joint at platform height or above, where the rope can hang clear to the ground: usually on an arm sticking out past the end. The rope pulls down with twice the load.`,
   zip: `A <b>zip wire anchor</b> (£60). Fix it to a joint at platform level next to a board. The wire runs to the pub and pulls that joint sideways, hardest when a rider is halfway across.`,
   chute: `A <b>rubble chute</b> (£40). Hang it off a joint at the end of the platform boards. It drops straight down, so it has to be over the skip.`,
+  ramp: `A <b>kicker</b> (£${RAMP.cost}): a little plywood funbox that sits on the boards over a joint. When Tyler rolls over it, either way, it throws him up about 1¼ m and on about 6 m before he's back at the same height.`,
+  qpipe: `A <b>quarter pipe</b> (£${QPIPE.cost}) for the very end of a run of boards. Tyler goes straight up it, about 1½ m, and comes back down going the other way. If there are boards over it 1 m higher, he lands on those instead.`,
 };
 const kitSeenThisSession = new Set();
 function introduceKit() {
@@ -5705,6 +6136,7 @@ function renderTools() {
   const pub = L.house.style === 'pub';
   el.innerHTML = TOOLS.filter(t => toolAvailable(t, L)).map(t => pub && t.id === 'protect' ? { ...t, name: 'Awning', price: `£${BOARDUP.cost} a window · no plywood at the pub` } : t).map(t => {
     const dis = false;
+    if (t.id === 'hatch' && !L.monster) t = { ...t, price: `£${HATCH.cost} · Tyler drops in, comes out the drain` };
     const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : t.id === 'hatch' ? (L.monster === 'hide' ? 'No digging here' : 'Nothing in the drains here') : ['wheel', 'zip', 'chute'].includes(t.id) ? 'Not on this job' : 'Later jobs') : t.price;
     return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${pub && t.id === 'protect' ? ICON.awning : ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
   }).join('') + `<hr><div class="mini"><button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button><button id="clearBtn" title="Remove everything">Clear</button></div><div class="mini"><button id="orderBtn" class="${S.showOrder ? 'on' : ''}" title="List the order the crew puts pieces up, and change it">Order list</button></div>`;
@@ -5760,12 +6192,17 @@ const TERRY = [
   "Twelve metres, glass everywhere, and wind like a train. Welcome to London.",
   "Twelve guests, nine metres up. If it wobbles, tell the DJ to slow it down.",
   "It's a rocket. How hard can it be? Don't answer that.",
+  "Two vans and a skip. If he hits a van, it's not our van.",
+  "What goes down a trap door comes out of a drain. That's just plumbing.",
+  "Up is harder than down. Charge accordingly.",
+  "Every hoop's money off the bill. Tell him to go through them all.",
+  "Nine metres, one kid, one mattress. Do it in stages.",
 ];
 function windowAt(pt) {
   const ws = S.L.house.windows || [];
   return ws.findIndex(w => pt.x > w.x - 0.25 && pt.x < w.x + w.w + 0.25 && pt.y > w.y - 0.25 && pt.y < w.y + w.h + 0.25);
 }
-const PNAME = { trap: 'Trap board', protect: 'Window board', tube: 'Tube', heavy: 'Heavy tube', board: 'Boards', deck: 'Steel deck', tie: 'Wall tie', ladder: 'Ladder', lock: 'Ladder lock' };
+const PNAME = { ramp: 'Kicker', qpipe: 'Quarter pipe', wheel: 'Gin wheel', zip: 'Zip wire anchor', chute: 'Rubble chute', hatch: 'Trap door', trap: 'Trap board', protect: 'Window board', tube: 'Tube', heavy: 'Heavy tube', board: 'Boards', deck: 'Steel deck', tie: 'Wall tie', ladder: 'Ladder', lock: 'Ladder lock' };
 function pieceDesc(p) {
   if (p.type === 'tube' || p.type === 'heavy') {
     const dx = p.b[0] - p.a[0], dy = p.b[1] - p.a[1];
@@ -5826,10 +6263,12 @@ function updateHelp() {
     ladder: '<b>Click</b> the foot (ground or a boarded platform), then the top. The top must land on boards. Dave only climbs ladders.',
     trap: `<b>Click or drag</b> along a tube to lay a fake board. It looks real but gives way under anyone. A chav who drops ${SAFE_FALL} m or less lies there dazed and the police pay ${fmt(TRAP_REWARD)} for them. Any higher and you get sued. Dave avoids trap boards if there's another way up.`,
     protect: S.L && S.L.house.style === 'pub' ? `<b>Click</b> a window to put a striped canvas awning over it (£${BOARDUP.cost}). The landlord won't have plywood on his pub, but an awning catches anything dropped from above. Windows marked ⚠ are in the firing line.` : `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${glz()} glazier). Windows marked ⚠ are in the firing line.`,
-    hatch: `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
+    hatch: S.L && !S.L.monster ? `<b>Click</b> the pavement to dig a trap door (${fmt(HATCH.cost)}). If Tyler lands on it he drops into the secret basement and shoots out of the storm drain.` : `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
     wheel: '<b>Click</b> a joint at platform height or above to fit the gin wheel. The rope must hang clear to the ground, so put it on an arm sticking out past the scaffold. Loads are swung onto the nearest board within 1.5 m.',
     zip: '<b>Click</b> a joint at platform level, next to a board, to anchor the zip wire. The wire runs to the pub and pulls that joint sideways, hard.',
     chute: '<b>Click</b> a joint at the end of the platform boards to hang the rubble chute. It drops straight down, so it has to be over the skip.',
+    ramp: `<b>Click</b> a joint on the boards to put down a kicker (£${RAMP.cost}). Tyler goes over it either way and gets thrown up and on. The dotted line shows where he'll go.`,
+    qpipe: `<b>Click</b> the joint at the very end of a run of boards for a quarter pipe (£${QPIPE.cost}). Tyler goes straight up and comes back down the other way, onto boards 1 m higher if there are any over it.`,
     lock: '<b>Click</b> any ladder to lock it. Chavs can\'t climb locked ladders, and Dave has the key.',
     order: '<b>Click pieces in the order you want them put up</b>, starting from #1. Anything you don\'t click keeps its place after. Use the order list to fine-tune.',
     erase: '<b>Click</b> any piece to remove it.',
@@ -5867,6 +6306,24 @@ function afterEdit() {
   refreshOrderLabels();
   renderOrderPanel();
 }
+// Tyler's predicted line through the air, in the design view.
+let bmxLine = null;
+const bmxLineMat = new THREE.LineDashedMaterial({ color: 0xff2d8a, dashSize: 0.18, gapSize: 0.12, transparent: true, opacity: 0.95, depthTest: false });
+function drawBmxLine(P) {
+  if (bmxLine) { overlay.remove(bmxLine); bmxLine.traverse(o => o.geometry && o.geometry.dispose()); bmxLine = null; }
+  clearLabels('bmx');
+  if (!P || S.mode !== 'design') return;
+  bmxLine = new THREE.Group(); bmxLine.renderOrder = 8;
+  for (const seg of P.segs) {
+    if (seg.length < 2) continue;
+    const g = new THREE.BufferGeometry().setFromPoints(seg.map(([x, y]) => new THREE.Vector3(x, y + 0.45, Z_MID)));
+    const l = new THREE.Line(g, bmxLineMat); l.computeLineDistances(); l.renderOrder = 8; bmxLine.add(l);
+  }
+  overlay.add(bmxLine);
+  const o = P.out, ok = o.kind === 'finish';
+  addLabel('bmx' + (ok ? ' ok' : ' bad'), ok ? '✓ Tyler' : '✗ Tyler', o.x, o.y + 1.2, Z_MID, 'bmx');
+  if (P.evs.some(e => e.what === 'hatch')) { const h = P.evs.find(e => e.what === 'drain'); if (h) addLabel('bmx', '↑ drain', h.x, h.y + 0.9, Z_MID, 'bmx'); }
+}
 function refreshRiskLabels() {
   clearLabels('risk');
   if (S.mode !== 'design') return;
@@ -5901,10 +6358,11 @@ function refreshDocket() {
   const ties = S.pieces.filter(p => p.type === 'tie').length;
   $('spent').textContent = fmt(cost);
   $('budget').textContent = 'of ' + fmt(L.budget) + ' quote';
-  $('profit').textContent = cost <= L.budget ? `Profit ${fmt(L.budget - cost)}` : `Loss ${fmt(cost - L.budget)}`;
-  $('profit').classList.toggle('neg', cost > L.budget);
+  const hoopCash = req.bmx ? req.bmx.cash : 0, netCost = cost - hoopCash;
+  $('profit').textContent = (netCost <= L.budget ? `Profit ${fmt(L.budget - netCost)}` : `Loss ${fmt(netCost - L.budget)}`) + (hoopCash ? ` with ${fmt(hoopCash)} hoop money` : '');
+  $('profit').classList.toggle('neg', netCost > L.budget);
   const f = $('barFill');
-  const frac = cost / L.budget;
+  const frac = netCost / L.budget;
   f.style.width = Math.min(100, frac * 100) + '%';
   f.style.background = frac > 1 ? 'var(--danger)' : frac > 0.85 ? 'var(--hivis-yellow)' : 'var(--safe)';
   $('tieCount').textContent = L.maxTies === 0 ? 'No ties allowed' : L.maxTies < 99 ? `Ties ${ties} / ${L.maxTies}` : `Ties ${ties}`;
@@ -5940,8 +6398,10 @@ function refreshDocket() {
   if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? (L.house.style === 'pub' ? 'Awnings over the windows in the firing line' : 'Windows in the firing line boarded') : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${glz()} each if smashed`]);
   for (const [ok, t] of req.event || []) items.push([ok, t]);
   if (L.monster === 'hide') items.push(['info', "Churchyard: no trap doors. Dave will climb up and pull his ladder up. The Gobbler will shake the scaffold"]);
-  if (L.toolHatch) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
-  items.push([frac <= 1, frac <= 1 ? `Under the quote by ${fmt(L.budget - cost)}` : `Over the quote by ${fmt(cost - L.budget)}`]);
+  if (L.toolHatch && L.monster) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
+  const cash = req.bmx ? req.bmx.cash : 0, net = cost - cash;
+  items.push([net <= L.budget, net <= L.budget ? `Under the quote by ${fmt(L.budget - net)}${cash ? ` after ${fmt(cash)} of hoop money` : ''}` : `Over the quote by ${fmt(net - L.budget)}${cash ? ` even after ${fmt(cash)} of hoop money` : ''}`]);
+  drawBmxLine(req.bmx);
   $('checks').innerHTML = items.map(([ok, t]) => `<li class="${ok === 'info' ? 'info' : ok ? 'ok' : ''}">${t}</li>`).join('');
   const b = $('buildBtn');
   b.disabled = !S.pieces.length;
@@ -6002,7 +6462,7 @@ function pieceAt(pt) {
     if (p.type === 'tie') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.12;
     else if (p.type === 'protect') { const w = S.L.house.windows[p.a[0]]; d = w ? Math.hypot(pt.x - w.x - w.w / 2, pt.y - w.y - w.h / 2) - 0.45 : 9; }
     else if (p.type === 'lock') d = Math.hypot(pt.x - p.a[0] - LAD_OFF, pt.y - p.a[1] - 0.75) - 0.35;
-    else if (p.type === 'wheel' || p.type === 'zip' || p.type === 'chute') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.2;
+    else if (p.type === 'wheel' || p.type === 'zip' || p.type === 'chute' || p.type === 'ramp' || p.type === 'qpipe') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1] - 0.25) - 0.25;
     else if (p.type === 'hatch') d = pt.y < p.a[1] + 0.8 ? Math.abs(pt.x - p.a[0]) - 0.45 : 9;
     else if (p.type === 'ladder') d = segDist(pt.x, pt.y, p.a[0] + LAD_OFF, p.a[1], p.b[0] + LAD_OFF, p.b[1] + 1) - 0.1;
     else if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') d = segDist(pt.x, pt.y, p.a[0] + 0.1, p.a[1] + 0.14, p.b[0] - 0.1, p.b[1] + 0.14) - 0.05;
@@ -6214,7 +6674,7 @@ window.addEventListener('pointerup', (ev) => {
   } else if (tool === 'protect' && moved < 8) {
     const i = windowAt(pt);
     if (i >= 0) tryPlace({ type: 'protect', a: [i, 0] }); else toast('Click a window to board it up');
-  } else if ((tool === 'wheel' || tool === 'zip' || tool === 'chute') && moved < 8) {
+  } else if ((tool === 'wheel' || tool === 'zip' || tool === 'chute' || tool === 'ramp' || tool === 'qpipe') && moved < 8) {
     const n = nearestNode(pt);
     if (n) tryPlace({ type: tool, a: n });
   } else if (tool === 'tie' && moved < 8) {
@@ -6276,12 +6736,12 @@ function updateDesignHover() {
       if (err) setTip(err, true, seg.a[0] + 0.5, seg.a[1]);
       else setTip(`${BOARDS[tool].name} · ${fmt(BOARDS[tool].cost)} · holds ${BOARDS[tool].cap} kg`, false, seg.a[0] + 0.5, seg.a[1]);
     }
-  } else if (tool === 'wheel' || tool === 'zip' || tool === 'chute') {
+  } else if (tool === 'wheel' || tool === 'zip' || tool === 'chute' || tool === 'ramp' || tool === 'qpipe') {
     const n = nearestNode(pt);
     if (n) {
       const err = validatePlacement(S.L, S.pieces, { type: tool, a: n });
       hoverRing.visible = true; hoverRing.position.set(n[0], n[1], Z_OUT + 0.02); hoverRing.material.color.set(err ? 0xff4d3a : 0xff7a1a);
-      const name = { wheel: 'Gin wheel · £45', zip: 'Zip wire anchor · £60', chute: 'Rubble chute · £40' }[tool];
+      const name = { wheel: 'Gin wheel · £45', zip: 'Zip wire anchor · £60', chute: 'Rubble chute · £40', ramp: `Kicker · £${RAMP.cost}`, qpipe: `Quarter pipe · £${QPIPE.cost}` }[tool];
       setTip(err || name, !!err, n[0], n[1]);
     }
   } else if (tool === 'tie') {
@@ -6319,7 +6779,7 @@ function updateDesignHover() {
     const x = Math.max(0, Math.min(S.L.W, Math.round(pt.x)));
     const err = validatePlacement(S.L, S.pieces, { type: 'hatch', a: [x, S.L.groundCol(x)] });
     hoverRing.visible = true; hoverRing.position.set(x, S.L.groundCol(x), Z_OUT + 0.02); hoverRing.material.color.set(err ? 0xff4d3a : 0xb04dff);
-    setTip(err || `Trap door · ${fmt(HATCH.cost)} · drops the Drain Gobbler into the secret basement`, !!err, x, S.L.groundCol(x) + 0.6);
+    setTip(err || `Trap door · ${fmt(HATCH.cost)} · ${S.L.monster ? 'drops the Drain Gobbler into the secret basement' : 'Tyler drops in and comes out of the drain'}`, !!err, x, S.L.groundCol(x) + 0.6);
   } else if (tool === 'protect') {
     const i = windowAt(pt);
     if (i >= 0) {
@@ -6353,13 +6813,21 @@ function show(id, on = true) { $(id).hidden = !on; }
 function hudDesign(on) { for (const id of ['job', 'docket', 'tools', 'go', 'corner', 'help', 'campad']) show(id, on); if (!on) $('orderPanel').hidden = true; }
 
 function frameCamera(L, instant = false) {
-  const target = new THREE.Vector3(0, Math.max(2.2, L.H * 0.46), 1.2);
+  // BMX jobs: get the finish, the hoops and anything in the way into the shot too
+  let x0 = 0, x1 = L.W, yTop = L.H;
+  if (L.event && L.event.type === 'bmx') {
+    const B = bmxSpec(L), xs = [B.finish.x0, B.finish.x1, ...B.hoops.map(h => h.x), ...B.obstacles.flatMap(o => [o.x0, o.x1]), ...(B.drain ? [B.drain.x] : [])];
+    x0 = Math.min(0, ...xs) - 0.5; x1 = Math.max(L.W, ...xs) + 0.5;
+    yTop = Math.max(L.H, (B.finish.y || 0) + 2, ...B.hoops.map(h => h.y + 1));
+  }
+  const W = x1 - x0;
+  const target = new THREE.Vector3((x0 + x1) / 2 - L.W / 2, Math.max(2.2, yTop * 0.46), 1.2);
   const aspect = window.innerWidth / window.innerHeight;
   const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), th = tv * aspect;
   const narrow = window.innerWidth < 760;
-  const dist = Math.max((L.W / 2 + 1.5) / th * (narrow ? 0.62 : 0.85), (L.H / 2 + 2.6) / tv) + (narrow ? 3 : 6.5);
+  const dist = Math.max((W / 2 + 1.5) / th * (narrow ? 0.62 : 0.85), (yTop / 2 + 2.6) / tv) + (narrow ? 3 : 6.5);
   if (narrow) target.x -= 0.7;
-  const pos = new THREE.Vector3(dist * Math.sin(0.14), target.y + dist * 0.1, target.z + dist * Math.cos(0.14));
+  const pos = new THREE.Vector3(target.x + dist * Math.sin(0.14), target.y + dist * 0.1, target.z + dist * Math.cos(0.14));
   S.camGoal = { target, pos, t: 0 };
   if (instant) { controls.target.copy(target); camera.position.copy(pos); S.camGoal = null; }
 }
@@ -6410,6 +6878,10 @@ function openBrief() {
   if (L.monster) facts.push('<span class="chip bad">Something in the drains</span>');
   if (L.night) facts.push('<span class="chip">Night job</span>');
   if (L.snow) facts.push('<span class="chip">Snow</span>');
+  if (L.bonus) facts.push('<span class="chip">Bonus job</span>');
+  if (L.toolRamp) facts.push('<span class="chip">Kickers</span>');
+  if (L.toolQpipe) facts.push('<span class="chip">Quarter pipes</span>');
+  if (L.event && L.event.type === 'bmx' && L.toolHatch) facts.push('<span class="chip">Trap door</span>');
   if (L.glazier) facts.push(`<span class="chip warn">Glass £${L.glazier} a pane</span>`);
   if (L.wind) facts.push(`<span class="chip warn">Wind: ${L.wind + L.gust > 35 ? 'strong gusts' : 'breezy'}</span>`);
   if (L.maxTies === 0) facts.push('<span class="chip bad">No wall ties</span>'); else if (L.maxTies < 99) facts.push(`<span class="chip">Max ${L.maxTies} wall ties</span>`);
@@ -6420,12 +6892,13 @@ function openBrief() {
     <div class="kicker">Job ${String(L.id).padStart(2, '0')} · ${L.client}</div>
     <h2>${L.name}</h2>
     <p>${L.brief}</p>
-    <div class="loads"><span class="h">Dave will carry up</span><span class="h" style="text-align:right">Weight</span><span class="h" style="text-align:right">Height</span>${loads}</div>
+    ${L.deliveries.length ? `<div class="loads"><span class="h">Dave will carry up</span><span class="h" style="text-align:right">Weight</span><span class="h" style="text-align:right">Height</span>${loads}</div>` : ''}
     <div class="facts">${facts.join('')}${best ? `<span class="chip">Your best ${fmt(best)}</span>` : ''}</div>
     <p class="tipline">${L.tip}</p>
     ${S.risk && S.risk.size ? `<p class="tipline">Anything over ${WINDOW_BREAK_KG} kg dumped in front of a window puts a brick through it: £${glz()} to the glazier, or £${BOARDUP.cost} to board it up first. ${S.risk.size} window${S.risk.size > 1 ? 's are' : ' is'} in the firing line on this job.</p>` : ''}
     ${L.chavs ? `<p class="tipline chav">After Dave's done, ${L.chavs > 1 ? L.chavs + ' local lads' : 'a local lad'} will turn up to swing on your tubes and climb any ladder that isn't locked. Every tag on the house costs ${fmt(TAG_COST)} to clean off. You don't have to lock them out: lay <b>trap boards</b> where they'll walk. A chav who drops ${SAFE_FALL} m or less gets carted off by the police, who pay ${fmt(TRAP_REWARD)} each. Drop one further than that and you get sued.</p>` : ''}
     ${L.monster ? `<p class="tipline chav">There's something living in the drains round here. After dark the <b>Drain Gobbler</b> crawls out of the manhole and goes looking for Dave. Dig a <b>trap door</b> (${fmt(HATCH.cost)}) in the pavement and it drops into the secret basement and gets sent back to the Underneath. No trap door and it eats Dave, and the agency charges ${fmt(NEW_BUILDER)} to send Jeff.</p>` : ''}
+    ${L.event && L.event.type === 'bmx' && L.bonus ? `<p class="tipline">Tyler rides at a steady 6 m/s. He can drop ${bmxSpec(L).maxDrop} m onto boards before something breaks${bmxSpec(L).finish.maxDrop ? `, and the ${bmxSpec(L).finish.label} is good for ${bmxSpec(L).finish.maxDrop} m` : ''}. The dotted pink line shows exactly where he'll go.</p>` : ''}
     <p class="terry"><b>Big Terry:</b> “${TERRY[L.id - 1]}”</p>
     <div class="row"><button class="big ghost" id="briefBack">Job sheet</button><button class="big" id="briefGo">${S.pieces.length ? 'Back to it' : 'Start the job'}</button></div>`;
   hudDesign(false);
@@ -6471,7 +6944,8 @@ function openSelect() {
   const cards = LEVELS.map((d, i) => {
     const st = save.d.stars[d.id] || 0, best = save.d.best[d.id];
     const open = unlocked(i);
-    return `<button class="card" data-i="${i}" ${open ? '' : 'disabled'} id="card-${d.id}">
+    const head = d.bonus && !LEVELS[i - 1].bonus ? `<div class="sect"><b>Bonus jobs</b> · Tyler's stunt tour${open ? '' : ` · opens when job ${String(BONUS_AFTER).padStart(2, '0')} is done`}</div>` : '';
+    return `${head}<button class="card${d.bonus ? ' bonus' : ''}" data-i="${i}" ${open ? '' : 'disabled'} id="card-${d.id}">
       <span class="cn num">${String(d.id).padStart(2, '0')}</span>
       <span class="ct">${d.name}</span>
       <span class="cc">${d.client}</span>
@@ -6512,7 +6986,7 @@ function startTest() {
   tipLabel.visible = false;
   overlay.visible = false;
   for (const l of labels) if (l.group === 'design') l.visible = false;
-  clearLabels('order'); clearLabels('risk');
+  clearLabels('order'); clearLabels('risk'); clearLabels('bmx');
   show('tools', false); show('help', false); $('orderPanel').hidden = true;
   $('buildBtn').hidden = true; $('speed').hidden = false; $('stopBtn').hidden = false;
   show('status');
@@ -6543,7 +7017,7 @@ function eventStatus(tr) {
     case 'party': return ['Party', ev.partyT < 0 ? `Guests arriving: ${up} of ${E.guests} up` : ev.partyT <= E.dur ? `Dancing! ${Math.max(0, E.dur - ev.partyT).toFixed(0)} s to go` : 'Everyone going home'];
     case 'zip': { const r = V.find(v => v.state === 'zip'); const c = V.find(v => v.state !== 'gone' && v.state !== 'wait'); return ['Zip wire', r ? `${r.name} is on the wire!` : c ? `${c.name} is climbing up` : 'All across']; }
     case 'chute': return ['Stripping the roof', ev.stage === 'fall' ? `Bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length}: down the chute` : `The roofers are throwing down bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length} of old slates`];
-    case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', splash: 'SPLASH!' }[r.state] || '']; }
+    case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', basement: 'Down the trap door…', finish: 'NAILED IT!', falling: 'Oh dear', flat: 'Oh dear' }[r.state] || '']; }
     case 'sleigh': { const st = ev.s.state; return ['Christmas Eve', { fly: 'Sleigh on approach…', slide: 'Touchdown! Braking…', parked: 'Parked. Presents going down the chimney', takeoff: 'And away!' }[st] || '']; }
     case 'fireworks': return ['Bonfire Night', ev.lit ? (ev.fired < E.rockets ? `Rocket ${ev.fired} of ${E.rockets}` : 'Grand finale done') : 'Terry is climbing up with a lighter'];
     case 'launch': return ['Launch', ev.stage === 'climb' ? 'The astronaut is climbing up' : ev.stage === 'count' ? `T minus ${ev.n}` : ev.stage === 'lift' ? (ev.rocketY < 0.2 ? 'Main engines building up…' : ev.nozzleY < 14 ? `LIFT-OFF! Exhaust blasting the tower at ${Math.max(0, ev.nozzleY).toFixed(0)} m` : 'Clearing the tower…') : 'Clear of the tower'];
@@ -6560,7 +7034,7 @@ function testStatus() {
   if (!tr) return;
   const b = tr.builder;
   const it = b.carrying ? `${b.carrying.def.name.toLowerCase()} (${kg(b.carrying.def.mass)})` : '';
-  if (tr.result && !tr.result.ok) return status(tr.result.sued ? 'Sued' : 'Collapse', tr.result.reason, true);
+  if (tr.result && !tr.result.ok) return status(tr.result.sued ? 'Sued' : tr.result.soft && S.L.event && S.L.event.type === 'bmx' ? 'Wipeout' : 'Collapse', tr.result.reason, true);
   if (tr.phase === 'event' && tr.ev) return status(...eventStatus(tr));
   if (tr.phase === 'monster' && tr.monster) {
     const st = tr.monster.state;
@@ -6611,6 +7085,7 @@ function showResult() {
   const charges = (tr.result && tr.result.ok) ? tr.charges : [];
   const chargeTotal = charges.reduce((a, c) => a + c.cost, 0);
   const chargeLines = {}; for (const c of charges) chargeLines[c.what] = (chargeLines[c.what] || 0) + c.cost;
+  const badCharges = Object.fromEntries(Object.entries(chargeLines).filter(([, v]) => v > 0));
   const cost = materials + tags * TAG_COST + smashed * glz() + (eaten ? NEW_BUILDER : 0) + chargeTotal - reward;
   const stood = tr.result && tr.result.ok && !tr.unfinished;
   const unfinished = tr.result && tr.result.ok && tr.unfinished;
@@ -6626,7 +7101,7 @@ function showResult() {
     sfx.fanfare();
   } else sfx.wah();
   const next = S.li + 1 < LEVELS.length;
-  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed || eaten || chargeTotal) && materials <= L.budget ? `It stood, but ${[smashed && `the glazier (${fmt(smashed * glz())})`, tags && `the graffiti clean-up (${fmt(tags * TAG_COST)})`, eaten && `hiring Jeff after Dave got eaten (${fmt(NEW_BUILDER)})`, chargeTotal && Object.entries(chargeLines).map(([k, v]) => `${k.toLowerCase()} (${fmt(v)})`).join(' and ')].filter(Boolean).join(' and ')} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
+  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed || eaten || Object.keys(badCharges).length) && materials <= L.budget ? `It stood, but ${[smashed && `the glazier (${fmt(smashed * glz())})`, tags && `the graffiti clean-up (${fmt(tags * TAG_COST)})`, eaten && `hiring Jeff after Dave got eaten (${fmt(NEW_BUILDER)})`, Object.keys(badCharges).length && Object.entries(badCharges).map(([k, v]) => `${k.toLowerCase()} (${fmt(v)})`).join(' and ')].filter(Boolean).join(' and ')} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
   const band = ok ? ['Safe for use*', '*as far as Terry knows'] : unfinished ? ['Not finished', 'No platform, no pay'] : sued ? ['Sued', 'See you in court'] : stood ? ['Not paid', 'Over the quote'] : ['Do not use', 'Scaffold incomplete'];
   const kills = trappedN;
   if (kills) { save.d.chavKills = (save.d.chavKills || 0) + kills; save.write(); }
@@ -6638,7 +7113,7 @@ function showResult() {
       <span class="k">Materials</span><span class="v num">${fmt(materials)}</span>
       ${reward ? `<span class="k">Police reward</span><span class="v num bonus">+${fmt(reward)} (${trappedN} chav${trappedN > 1 ? 's' : ''})</span>` : ''}
       ${smashed ? `<span class="k">Glazier</span><span class="v num">${fmt(smashed * glz())} (${smashed} window${smashed > 1 ? 's' : ''})</span>` : ''}
-      ${Object.entries(chargeLines).map(([k, v]) => `<span class="k">${k}</span><span class="v num">${fmt(v)}</span>`).join('')}
+      ${Object.entries(chargeLines).map(([k, v]) => v < 0 ? `<span class="k">${k}</span><span class="v num bonus">+${fmt(-v)}</span>` : `<span class="k">${k}</span><span class="v num">${fmt(v)}</span>`).join('')}
       ${eaten ? `<span class="k">New builder</span><span class="v num">${fmt(NEW_BUILDER)} (Dave got eaten)</span>` : ''}
       ${tr.result && tr.result.monsterTrapped ? `<span class="k">Drain Gobbler</span><span class="v bonus">Back in the Underneath</span>` : ''}
       ${tags ? `<span class="k">Graffiti</span><span class="v num">${fmt(tags * TAG_COST)} (${tags} tag${tags > 1 ? 's' : ''})</span>` : ''}
@@ -6670,7 +7145,7 @@ function knockPeople(tr, hitters, L) {
   const hitBy = (x, y, z) => hitters.find(h => Math.abs(h.x - x) < 0.45 && h.y > y - 0.1 && h.y < y + 1.9 && Math.abs(h.z - z) < 0.9);
   const engine = [[tr.builder, tr.builder.who === 'agency' ? kevin : dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)]), ...tr.visitors.map(v => [v, visitorMesh(v)])];
   for (const [p, mesh] of engine) {
-    if (!p.visible || !mesh.visible || p.ragdolled || ['falling', 'flat', 'gone', 'zip'].includes(p.state)) continue;
+    if (!p.visible || !mesh.visible || p.ragdolled || p.bike || ['falling', 'flat', 'gone', 'zip'].includes(p.state)) continue;   // Tyler's too quick for falling junk
     const h = hitBy(p.x, p.y, mesh.position.z);
     if (!h || h.src === p) continue;
     p.tangled = false; p.knocked = true;
@@ -6840,10 +7315,25 @@ function eventFx(ev, L, tr) {
     if (ev.what === 'car') { sfx.glass(); sfx.thud(200); say("THE BISHOP'S CAR!", ev.x, 2.4, 'sued', 2); puff(ev.x, 1.2, 3.6, 10, 0.7, 0x7a7266); S.shake = Math.max(S.shake, 0.12); }
     if (ev.what === 'mess') { sfx.thud(150); puff(ev.x, 0.4, Z_MID, 8, 0.6, 0x7a7266); }
   } else if (ev.type === 'bmx') {
-    if (ev.what === 'appear') say('SEND IT!', ev.x, zy + 2.2);
-    if (ev.what === 'launch') { say('WAHEYYY!', ev.x, zy + 2.2, 'bonus'); sfx.snap(); }
-    if (ev.what === 'splash') { say('SPLOOSH!', ev.x, 2.2, 'bonus', 2.2); for (let i = 0; i < 4; i++) puff(ev.x + (Math.random() - 0.5), 0.5, Z_MID, 6, 0.7, 0x9fe0ff); sfx.splat(); sfx.fanfare(); }
-    if (ev.what === 'crash') { say('OOF!', ev.x, 2, 'sued'); sfx.splat(); }
+    const hy = ev.y ?? zy;
+    if (ev.what === 'appear') say('SEND IT!', ev.x, hy + 2.2);
+    if (ev.what === 'launch') { say(['WAHEYYY!', 'YEEEW!', 'BRAAAP!'][Math.floor(Math.random() * 3)], ev.x, hy + 2.2, 'bonus'); sfx.snap(); }
+    if (ev.what === 'kick') { say(['AIR!', 'TAILWHIP!', 'NO HANDER!'][Math.floor(Math.random() * 3)], ev.x, hy + 2.4, 'bonus'); sfx.snap(); }
+    if (ev.what === 'qpipe') { say(['UP IT!', 'FAKIE!', 'BOOST!'][Math.floor(Math.random() * 3)], ev.x, hy + 2.8, 'bonus'); sfx.snap(); }
+    if (ev.what === 'land') { sfx.thud(80 + 60 * (ev.drop || 0)); puff(ev.x, hy + 0.15, Z_MID, 4, 0.35, 0xc8b89a); }
+    if (ev.what === 'trap') { sfx.crack(); say('CRACK!', ev.x + 0.5, hy + 0.8); }
+    if (ev.what === 'hoop') { const h = bmxProps.hoops[ev.i]; if (h) h.got = 1.2; say(`+${fmt(ev.cash)}`, ev.x, ev.y + 0.9, 'bonus', 1.6); sfx.fanfare(); }
+    if (ev.what === 'hatch') { const h = hatchViews.find(v => Math.abs(v.x - ev.x) < 0.1); if (h) { h.target = 1; h.glowT = 2.5; setTimeout(() => { h.target = 0; }, 1800); } sfx.thunk(); say('DOWN THE HATCH!', ev.x, hy + 2, 'bonus', 2); }
+    if (ev.what === 'drain') { sfx.portal(); for (let i = 0; i < 6; i++) puff(ev.x + (Math.random() - 0.5) * 0.5, hy + 0.2 + i * 0.35, Z_MID, 5, 0.6, 0x9fe0ff); say('WHOOSH!', ev.x, hy + 2.2, 'bonus', 2); S.shake = Math.max(S.shake, 0.06); }
+    if (ev.what === 'finish') {
+      const p = ev.prop;
+      if (p === 'pool') { say('SPLOOSH!', ev.x, hy + 2, 'bonus', 2.2); for (let i = 0; i < 4; i++) puff(ev.x + (Math.random() - 0.5), hy + 0.3, Z_MID, 6, 0.7, 0x9fe0ff); sfx.splat(); }
+      else if (p === 'balcony') { say('DING DONG!', ev.x, hy + 2.8, 'bonus', 3); if (bmxProps.bell) bmxProps.bell.ring = 1; for (let i = 0; i < 6; i++) setTimeout(() => sfx.clank(0.6), i * 420); }
+      else { say(p === 'skip' ? 'BOOF!' : 'FWUMPH!', ev.x, hy + 2, 'bonus', 2.2); puff(ev.x, hy + 0.2, Z_MID, 8, 0.6, p === 'skip' ? 0xe8e2d4 : 0xcfe0ff); sfx.thud(150); }
+      setTimeout(() => sfx.fanfare(), 400);
+    }
+    if (ev.what === 'crash') { say('OOF!', ev.x, hy + 2, 'sued'); sfx.splat(); S.shake = Math.max(S.shake, 0.08); }
+    if (ev.what === 'bored') say('Boring. I\'m going home.', ev.x, hy + 2, 'sued', 2.5);
   } else if (ev.type === 'sleigh') {
     if (ev.what === 'bells') { for (let i = 0; i < 8; i++) sfx.clank(0.25); say('♪ jingle jingle ♪', 0, zy + 4, 'bonus', 2.5); }
     if (ev.what === 'touchdown') { sfx.thud(420); S.shake = Math.max(S.shake, 0.15); say('SKRRRRR', ev.x, zy + 1.8); }

@@ -120,10 +120,10 @@ function syncHatches(L, pieces) {
   for (const h of hatchViews) h.g.parent && h.g.parent.remove(h.g);
   hatchViews = [];
   if (manhole) { manhole.g.parent && manhole.g.parent.remove(manhole.g); manhole = null; }
-  if (!L.monster) return;
+  if (!L.monster && !L.toolHatch) return;
   for (const p of pieces.filter(q => q.type === 'hatch')) {
     const x = p.a[0], y = L.groundAt(x);
-    const g = new THREE.Group(); g.position.set(x, y, HATCH_Z);
+    const g = new THREE.Group(); g.position.set(x, y, L.monster ? HATCH_Z : Z_MID);
     const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.0), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.012; hole.visible = false; g.add(hole);
     const glow = new THREE.PointLight(0xb04dff, 0, 6); glow.position.y = 0.4; g.add(glow);
     const hinge = new THREE.Group(); hinge.position.set(0, 0.03, -0.55); g.add(hinge);   // hinged on the house side
@@ -133,6 +133,7 @@ function syncHatches(L, pieces) {
     levelGroup.add(g);
     hatchViews.push({ g, hinge, hole, glow, x, open: 0, target: 0, glowT: 0 });
   }
+  if (!L.monster) return;
   const mx = MONSTER_X, my = L.groundAt(0);
   const g = new THREE.Group(); g.position.set(mx, my, HATCH_Z);
   const hole = new THREE.Mesh(new THREE.CircleGeometry(0.62, 24), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.01; g.add(hole);
@@ -140,6 +141,21 @@ function syncHatches(L, pieces) {
   levelGroup.add(g);
   manhole = { g, cover, open: 0 };
 }
+// BMX kit: a kicker (a little funbox, ramped both ways) and a quarter pipe.
+const bmxKit = [];
+const plyMatK = new THREE.MeshStandardMaterial({ color: 0xd9b27a, roughness: 0.75, map: woodTex, side: THREE.DoubleSide });
+const kickerGeo = (() => {
+  const sh = new THREE.Shape(); sh.moveTo(-0.55, 0); sh.lineTo(0.55, 0); sh.lineTo(0.15, 0.32); sh.lineTo(-0.15, 0.32); sh.lineTo(-0.55, 0);
+  return new THREE.ExtrudeGeometry(sh, { depth: Z_OUT - Z_IN + 0.1, bevelEnabled: false });
+})();
+const qpipeGeo = (() => {
+  // concave face towards +x (the boards); the lip is at x = 0, over the joint
+  const R = 0.85, sh = new THREE.Shape();
+  sh.moveTo(-0.12, 0); sh.lineTo(R, 0);
+  for (let i = 1; i <= 12; i++) { const a = i / 12 * Math.PI / 2; sh.lineTo(R - R * Math.sin(a), R - R * Math.cos(a)); }
+  sh.lineTo(-0.12, R); sh.lineTo(-0.12, 0);
+  return new THREE.ExtrudeGeometry(sh, { depth: Z_OUT - Z_IN + 0.1, bevelEnabled: false, curveSegments: 12 });
+})();
 // Gin wheel, zip wire anchor and rubble chute, as placed in the design.
 const eventPieces = { wheel: null, cable: null, chute: null, anchor: null };
 const orangeM = new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.6 });
@@ -166,6 +182,16 @@ function syncEventPieces(L, pieces) {
     c.position.set((x0 + tx) / 2, (y0 + ty) / 2, (z0 + z1) / 2);
     c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / len, dy / len, dz / len));
     levelGroup.add(c); eventPieces.cable = c;
+  }
+  for (const k of bmxKit) k.parent && k.parent.remove(k);
+  bmxKit.length = 0;
+  if (E.type === 'bmx') for (const p of pieces.filter(q => q.type === 'ramp' || q.type === 'qpipe')) {
+    const [x, y] = p.a, dep = Z_OUT - Z_IN + 0.1;
+    const geo = p.type === 'ramp' ? kickerGeo : qpipeGeo;
+    const m = new THREE.Mesh(geo, plyMatK); m.castShadow = true; m.receiveShadow = true;
+    m.position.set(x, y + 0.13, Z_IN - 0.05);
+    if (p.type === 'qpipe') { const right = pieces.some(q => (q.type === 'board' || q.type === 'deck' || q.type === 'trap') && q.a[1] === y && Math.min(q.a[0], q.b[0]) <= x && Math.max(q.a[0], q.b[0]) > x); m.scale.x = right ? 1 : -1; }
+    levelGroup.add(m); bmxKit.push(m);
   }
   const ch = pieces.find(p => p.type === 'chute');
   if (ch && E.type === 'chute') {
@@ -463,7 +489,7 @@ function buildLevelScene(L) {
     { x0: L.house.x0 - 12, x1: L.house.x0 - 3.5, eaves: 6, brick: L.house.brick === 'red' ? 'yellow' : 'red', windows: [{ x: L.house.x0 - 10.5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 10.5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x0 - 7, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x0 - 5.4, w: 1, h: 2.1, color: '#355c7d' }, chimney: L.house.x0 - 9 },
     { x0: L.house.x1 + 3.5, x1: L.house.x1 + 12, eaves: 6, brick: L.house.brick === 'stone' ? 'render' : 'stone', windows: [{ x: L.house.x1 + 5, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 0.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 5, y: 3.9, w: 1.2, h: 1.3 }, { x: L.house.x1 + 9, y: 3.9, w: 1.2, h: 1.3 }], door: { x: L.house.x1 + 7.2, w: 1, h: 2.1, color: '#a23b2a' }, chimney: L.house.x1 + 6 },
   ];
-  const nb = ['church', 'abbey', 'cathedral', 'rocket', 'tower'].includes(style) ? [] : style === 'leisure' || style === 'hall' ? [nbAll[0]] : nbAll;
+  const nb = ['church', 'abbey', 'cathedral', 'rocket', 'tower'].includes(style) ? [] : style === 'leisure' || style === 'hall' || (L.event && (L.event.obstacles || []).some(o => o.prop === 'wall')) ? [nbAll[0]] : nbAll;
   for (const n of nb) { const hg = buildHouse(G, { ...n, style: 'terrace' }, { snow: L.snow }); hg.position.z = -2.5; }
   buildTheme(G, L, style);
   // paved strip in front, stepped by column
@@ -626,6 +652,12 @@ function buildTheme(G, L, style) {
     for (const x of [1.5, L.W - 1.5]) { box(1.4, 0.06, 0.5, M.bark, x, 0.72, 3.0, G); for (const dz of [-0.45, 0.45]) box(1.4, 0.05, 0.25, M.bark, x, 0.45, 3.0 + dz, G); }
   }
   if (style === 'mill') buildMill(G, L);
+  if (style === 'yard') {
+    // racks of tube and stacks of boards by the gate
+    for (let i = 0; i < 4; i++) { const t = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 6, 8), M.steel); t.rotation.z = Math.PI / 2; t.position.set(-3.5, 0.3 + i * 0.12, 4.0 + (i % 2) * 0.1); G.add(t); }
+    for (let i = 0; i < 6; i++) box(3.9, 0.06, 0.25, M.wood, -3.2, 0.05 + i * 0.07, 5.0, G);
+    for (const [x, z] of [[-1.5, 3.6], [-0.8, 3.9]]) { box(1.2, 0.14, 1.0, M.bark, x, 0.07, z, G); box(1.0, 0.6, 0.9, texFromFacade('red', 1, 0.6), x, 0.44, z, G); }
+  }
   if (style === 'church') {
     // west tower and spire off to the left
     const tx0 = h.x0 - 4.2, tw = 3.6, th = 14;
@@ -690,17 +722,7 @@ function buildTheme(G, L, style) {
       for (const dx of [-0.9, 0.9]) box(0.05, 2, 0.05, M.white, dx, 1, -0.5, stall);
     }
   }
-  if (E.type === 'bmx') {
-    const [p0, p1] = E.pool;
-    const pool = new THREE.Group(); G.add(pool); pool.position.set((p0 + p1) / 2, 0, Z_MID);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry((p1 - p0) / 2, 0.22, 10, 32), new THREE.MeshStandardMaterial({ color: 0x3fa9f5, roughness: 0.4 }));
-    ring.rotation.x = Math.PI / 2; ring.position.y = 0.22; pool.add(ring);
-    const water = new THREE.Mesh(new THREE.CircleGeometry((p1 - p0) / 2 - 0.05, 32), new THREE.MeshStandardMaterial({ color: 0x6fd0ff, roughness: 0.1, transparent: true, opacity: 0.85 }));
-    water.rotation.x = -Math.PI / 2; water.position.y = 0.3; pool.add(water);
-    const duck = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffd12d })); duck.position.set(0.3, 0.38, 0.2); pool.add(duck);
-    const sgn = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), new THREE.MeshStandardMaterial({ map: labelTex('LANDING\nZONE'), roughness: 0.8 })); sgn.position.set(0, 1.1, -1.3); pool.add(sgn);
-    const post = box(0.05, 1, 0.05, M.bark, 0, 0.5, -1.32, pool);
-  }
+  if (E.type === 'bmx') buildBmxScene(G, L);
   if (E.type === 'fireworks') {
     // bonfire in the close
     const bx = -3.5;
@@ -733,6 +755,121 @@ function buildTheme(G, L, style) {
 //  waterwheel on its race.
 // ---------------------------------------------------------------------------
 const sceneTickers = [];
+// ---------------------------------------------------------------------------
+//  BMX jobs: the finish (pool, skip, airbag, crash mat, belfry balcony),
+//  things to hit (vans, walls), the sponsor's hoops and the storm drain.
+// ---------------------------------------------------------------------------
+const bmxProps = { hoops: [], bell: null, finish: null, drain: null };
+function buildBmxScene(G, L) {
+  const E = L.event, F = E.finish || { kind: 'ground', x0: E.pool[0], x1: E.pool[1], y: 0.25, prop: 'pool' };
+  bmxProps.hoops = []; bmxProps.bell = null; bmxProps.finish = null; bmxProps.drain = null;
+  const fw = F.x1 - F.x0, fx = (F.x0 + F.x1) / 2;
+  const post = (text, x, z) => {
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.45), new THREE.MeshStandardMaterial({ map: labelTex(text), roughness: 0.8 })); sg.position.set(x, 1.1, z); G.add(sg);
+    box(0.05, 1, 0.05, M.bark, x, 0.5, z - 0.03, G);
+  };
+  if (F.prop === 'pool') {
+    const pool = new THREE.Group(); G.add(pool); pool.position.set(fx, 0, Z_MID);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(fw / 2, 0.22, 10, 32), new THREE.MeshStandardMaterial({ color: 0x3fa9f5, roughness: 0.4 }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.22; pool.add(ring);
+    const water = new THREE.Mesh(new THREE.CircleGeometry(fw / 2 - 0.05, 32), new THREE.MeshStandardMaterial({ color: 0x6fd0ff, roughness: 0.1, transparent: true, opacity: 0.85 }));
+    water.rotation.x = -Math.PI / 2; water.position.y = 0.3; pool.add(water);
+    const duck = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshStandardMaterial({ color: 0xffd12d })); duck.position.set(0.3, 0.38, 0.2); pool.add(duck);
+    post('LANDING\nZONE', fx, Z_MID - 1.3);
+    bmxProps.finish = pool;
+  } else if (F.prop === 'skip') {
+    const sk = new THREE.Group(); G.add(sk); sk.position.set(fx, 0, Z_MID);
+    const yel = new THREE.MeshStandardMaterial({ color: 0xf0b90b, roughness: 0.6, metalness: 0.2 });
+    const sh = new THREE.Shape(); sh.moveTo(-fw / 2 + 0.35, 0); sh.lineTo(fw / 2 - 0.35, 0); sh.lineTo(fw / 2, F.y); sh.lineTo(-fw / 2, F.y); sh.lineTo(-fw / 2 + 0.35, 0);
+    const body = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 1.7, bevelEnabled: false }), yel); body.position.z = -0.85; body.castShadow = true; sk.add(body);
+    box(fw + 0.06, 0.08, 1.76, M.dark, 0, F.y, 0, sk);
+    const matt = [0xf2efe6, 0xdfe8f2, 0xe9dccb];
+    for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(new RoundedBoxGeometry(fw * 0.42, 0.22, 1.4, 2, 0.08), new THREE.MeshStandardMaterial({ color: matt[i], roughness: 0.95 })); m.position.set(-fw * 0.25 + i * fw * 0.25, F.y + 0.05 + i * 0.06, 0); m.rotation.z = (i - 1) * 0.12; m.castShadow = true; sk.add(m); }
+    post('MIND THE\nSKIP', F.x1 + 0.8, Z_MID - 0.9);
+    bmxProps.finish = sk;
+  } else if (F.prop === 'airbag' || F.prop === 'mat') {
+    const big = F.prop === 'airbag';
+    const col = big ? 0x2a6fdb : 0x2b4fa0;
+    const m = new THREE.Mesh(new RoundedBoxGeometry(fw, F.y, big ? 3 : 2.2, 4, big ? 0.35 : 0.12), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }));
+    m.position.set(fx, F.y / 2, Z_MID); m.castShadow = true; m.receiveShadow = true; G.add(m);
+    const lab = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(fw - 0.3, 2.2), F.y * 0.6), new THREE.MeshStandardMaterial({ map: labelTex(big ? 'STUNT' : 'CRASH MAT', '#2a6fdb', '#ffffff'), roughness: 0.7, transparent: true }));
+    lab.position.set(fx, F.y / 2, Z_MID + (big ? 1.51 : 1.11)); G.add(lab);
+    if (big) for (const dx of [-fw / 2 + 0.3, fw / 2 - 0.3]) { const fan = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.3, 16), M.dark); fan.rotation.x = Math.PI / 2; fan.position.set(fx + dx, 0.3, Z_MID + 1.7); G.add(fan); }
+    bmxProps.finish = m;
+  } else if (F.prop === 'balcony') {
+    // a stone balcony round the belfry, with the bell in the louvred opening above it
+    const dressed = new THREE.MeshStandardMaterial({ color: 0xcfc6b2, roughness: 0.85 });
+    const z0 = -1.0, z1 = 1.6, zc = (z0 + z1) / 2;
+    box(fw + 0.3, 0.22, z1 - z0, dressed, fx, F.y - 0.11, zc, G);
+    for (let i = 0; i <= 8; i++) { const x = F.x0 - 0.1 + i * (fw + 0.2) / 8; box(0.07, 0.75, 0.07, dressed, x, F.y + 0.37, z1 - 0.05, G, false); }
+    box(fw + 0.3, 0.08, 0.14, dressed, fx, F.y + 0.78, z1 - 0.05, G);
+    for (const sx of [F.x0 - 0.1, F.x1 + 0.1]) box(0.14, 0.08, z1 - z0, dressed, sx, F.y + 0.78, zc, G);
+    for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 4), dressed); c.rotation.x = Math.PI; c.position.set(F.x0 + 0.3 + i * (fw - 0.6) / 2, F.y - 0.45, z1 - 0.2); G.add(c); }
+    const arch = new THREE.Mesh(new THREE.ShapeGeometry(lancetShape(1.5, 2.6)), M.dark); arch.position.set(fx, F.y + 1.0, -0.98); G.add(arch);
+    const bellG = new THREE.Group(); bellG.position.set(fx, F.y + 3.2, -0.6); G.add(bellG);
+    const prof = [[0, 0], [0.42, 0], [0.45, 0.06], [0.36, 0.25], [0.26, 0.7], [0.24, 0.9], [0.1, 0.98], [0, 1]].map(([x, y]) => new THREE.Vector2(x, -y));
+    const bell = new THREE.Mesh(new THREE.LatheGeometry(prof.reverse(), 24), M.brass); bell.position.y = -0.05; bell.rotation.x = Math.PI; bell.position.y = -1.0;
+    const bell2 = new THREE.Group(); bell2.add(bell); bellG.add(bell2);
+    box(1.2, 0.12, 0.12, M.bark, 0, 0.05, 0, bellG);
+    bmxProps.bell = { g: bell2, ring: 0 };
+    sceneTickers.push((dt) => { const b = bmxProps.bell; if (!b) return; b.ring = Math.max(0, b.ring - dt * 0.12); b.g.rotation.z = Math.sin(performance.now() / 260) * 0.9 * b.ring; });
+    bmxProps.finish = bellG;
+  }
+  // things in the way
+  const vanCols = [0xf4f2ec, 0x2f6fb8, 0xc0392b];
+  (E.obstacles || []).forEach((o, i) => {
+    const w = o.x1 - o.x0, cx = (o.x0 + o.x1) / 2;
+    if (o.prop === 'van') {
+      const v = new THREE.Group(); G.add(v); v.position.set(cx, 0, Z_MID);
+      const paint = new THREE.MeshPhysicalMaterial({ color: vanCols[i % 3], roughness: 0.35, clearcoat: 0.6 });
+      const body = new THREE.Mesh(new RoundedBoxGeometry(w, o.y1 - 0.35, 1.8, 3, 0.12), paint); body.position.y = 0.35 + (o.y1 - 0.35) / 2; body.castShadow = true; v.add(body);
+      const ws = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 1.5), M.glass); ws.position.set(w / 2 + 0.01, o.y1 - 0.55, 0); v.add(ws);
+      for (const dx of [-w / 2 + 0.45, w / 2 - 0.45]) for (const dz of [-0.85, 0.85]) { const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.22, 16), M.dark); wh.rotation.x = Math.PI / 2; wh.position.set(dx, 0.33, dz); v.add(wh); }
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.7, 0.4), new THREE.MeshStandardMaterial({ map: labelTex(['TUBE & CLAMP', 'PLUMBING', 'DAVE & SON'][i % 3]), roughness: 0.6 })); sg.position.set(0, o.y1 * 0.55, 0.91); v.add(sg);
+    } else if (o.prop === 'wall') {
+      const d = 11, zc = 3.3 - d / 2, tm = texFromFacade('red', d, o.y1), tf = texFromFacade('red', w, o.y1);
+      box(w, o.y1, d, [tm, tm, M.sill, M.sill, tf, tf], cx, o.y1 / 2, zc, G);
+      box(w + 0.2, 0.16, d + 0.1, M.sill, cx, o.y1 + 0.08, zc, G);
+      for (let z = zc - d / 2 + 1; z < zc + d / 2; z += 2.5) box(w + 0.25, o.y1 * 0.92, 0.5, tf, cx, o.y1 * 0.46, z, G);
+      const ps = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.5), new THREE.MeshStandardMaterial({ map: labelTex('MEMORIAL\nPARK', '#2f5d3a', '#ffffff'), roughness: 0.7 })); ps.position.set(cx, 2.6, zc + d / 2 + 0.27); G.add(ps);
+      // the park beyond
+      for (const [x, z, s2] of [[o.x1 + 2, -3, 1.2], [o.x1 + 6.5, -4, 1.5], [o.x1 + 4, 5, 1]]) { const t = new THREE.Mesh(new THREE.IcosahedronGeometry(1.3 * s2, 1), M.leaf); t.position.set(x, 2.6 * s2, z); t.castShadow = true; G.add(t); box(0.25, 2 * s2, 0.25, M.bark, x, s2, z, G); }
+      const gr = new THREE.Mesh(new THREE.PlaneGeometry(14, 16), new THREE.MeshStandardMaterial({ color: 0x6f9a45, roughness: 1 })); gr.rotation.x = -Math.PI / 2; gr.position.set(o.x1 + 7, 0.015, Z_MID - 3); gr.receiveShadow = true; G.add(gr);
+    }
+  });
+  // the sponsor's hoops, on poles
+  (E.hoops || []).forEach((h, i) => {
+    const g = new THREE.Group(); g.position.set(h.x, h.y, Z_MID); G.add(g);
+    const r = h.r ?? 0.6;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 0.06, 10, 36), new THREE.MeshStandardMaterial({ color: h.fire ? 0x3a3d42 : 0xff2d8a, roughness: 0.4, metalness: h.fire ? 0.7 : 0.1, emissive: h.fire ? 0x000000 : 0x550022 }));
+    ring.rotation.y = 1.0; g.add(ring);
+    box(0.06, h.y - r, 0.06, M.iron, h.x, (h.y - r) / 2, Z_MID - 0.5, G);
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.3), new THREE.MeshStandardMaterial({ map: labelTex(`FIZZ £${h.cash}`, '#ff2d8a', '#ffffff'), roughness: 0.6 })); tag.position.set(0, -r - 0.3, -0.45); g.add(tag);
+    const flames = [];
+    if (h.fire) for (let k = 0; k < 10; k++) {
+      const a = k / 10 * Math.PI * 2;
+      const f = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 6), new THREE.MeshBasicMaterial({ color: k % 2 ? 0xff7a1a : 0xffd12d, transparent: true, opacity: 0.9 }));
+      f.position.set(Math.cos(a) * r * Math.cos(1.0), Math.sin(a) * r + 0.12, -Math.cos(a) * r * Math.sin(1.0)); g.add(f); flames.push(f);
+    }
+    const hv = { g, ring, flames, got: 0 };
+    bmxProps.hoops[i] = hv;
+    sceneTickers.push((dt) => {
+      const t = performance.now() / 1000;
+      for (const [k, f] of flames.entries()) f.scale.y = 1 + Math.sin(t * 17 + k * 1.7) * 0.35;
+      if (hv.got > 0) { hv.got = Math.max(0, hv.got - dt); ring.rotation.z += dt * 14 * hv.got; g.scale.setScalar(1 + 0.25 * Math.sin(hv.got * 12) * hv.got); }
+    });
+  });
+  // the storm drain he shoots out of
+  if (E.drain) {
+    const D = E.drain, gy = L.groundAt(D.x);
+    const g = new THREE.Group(); g.position.set(D.x, gy, Z_MID); G.add(g);
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.55, 24), holeMat); hole.rotation.x = -Math.PI / 2; hole.position.y = 0.012; g.add(hole);
+    for (let k = -2; k <= 2; k++) box(0.06, 0.04, 1.0, ironMat, k * 0.18, 0.03, 0, g, false);
+    const sg = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), new THREE.MeshStandardMaterial({ map: labelTex('STORM\nDRAIN'), roughness: 0.8 })); sg.position.set(0.9, 0.9, -1.2); g.add(sg);
+    box(0.05, 0.7, 0.05, M.bark, 0.9, 0.35, -1.23, g);
+    bmxProps.drain = g;
+  }
+}
 function sceneryTick(dt) { for (const f of sceneTickers) f(dt); }
 function buildMill(G, L) {
   const h = L.house, w = h.x1 - h.x0, cx = (h.x0 + h.x1) / 2, ld = h.loadingDoors;

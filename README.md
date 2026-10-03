@@ -15,7 +15,7 @@ Big Terry's rule: *as long as it doesn't fall down, it's fine.*
 - **Something lives in the drains** on jobs 1, 4, 7 and 10. After dark the Drain Gobbler crawls out of the manhole and heads for Dave. Dig a **trap door** (£30) in the pavement and it drops into the secret basement and gets sent back to the Underneath. Otherwise it eats Dave, and the agency charges £100 to send Jeff.
 - Collapses take the house with them: windows, gutters, pots and gnomes. Dave gets tangled in the tubes and ascends.
 
-24 jobs, with tighter quotes, heavier loads and more chavs as you go. Stars for coming in well under the quote.
+24 jobs, plus five bonus jobs, with tighter quotes, heavier loads and more chavs as you go. Stars for coming in well under the quote.
 
 Jobs 13–24 each do something with the top platform beyond loading it:
 
@@ -26,13 +26,23 @@ Jobs 13–24 each do something with the top platform beyond loading it:
 | 15 Sanctuary | Church at night | No trap doors in a churchyard: Dave climbs up and pulls the ladder up, and the Drain Gobbler shakes the scaffold |
 | 16 Down the Chute | Abbey | Roofers drop rubble onto the platform; hang a chute over the skip or it lands on the Bishop's car |
 | 17 Last Orders | Village hall | A zip wire to the pub across the road pulls the top of the scaffold sideways |
-| 18 Pedal Power | Leisure centre | A BMX rides along the platform and off the end; where the platform stops decides whether he hits the paddling pool |
+| 18 Pedal Power | Leisure centre | Tyler rides his BMX along the platform and off the end; where the platform stops decides whether he hits the paddling pool |
 | 19 Remember, Remember | Cathedral close, night | Fireworks from the platform; stray rockets go for £300 stained glass |
 | 20 Christmas Eve | Snowy terrace | Father Christmas lands on the platform and skids to a stop: needs a long runway and bracing against the shove |
 | 21 Ring Out | Cathedral tower | A 900 kg bell up to the belfry, past a flying buttress |
 | 22 Glass Act | Skyscraper | 12 m up in the wind, ties only at the floor slabs |
 | 23 Penthouse Party | Skyscraper | The dance party again, 9 m up in the wind |
 | 24 Launch Day | Rocket pad | A crew access tower up to the capsule that has to survive the lift-off blast |
+
+**Bonus jobs: Tyler's stunt tour** open once job 18 is done. Tyler is back on his BMX, with new kit: a **kicker** (throws him up about 1¼ m and on), a **quarter pipe** (straight up and back the way he came, or onto boards 1 m higher if they're over it), plus **trap boards** that give way under him and a **trap door** that drops him into the secret basement and out of the storm drain. He can drop 3½ m onto boards. A dotted pink line in design mode shows exactly where he'll go.
+
+| Job | Where | The stunt |
+| --- | --- | --- |
+| 25 Skip Jump | Builders' merchant | Kicker over two parked vans into a skip of mattresses |
+| 26 Down the Drain | Terraced street | Land on the trap door so the storm drain fires him over the park wall into the paddling pool |
+| 27 Up the Spire | Church | Zig-zag up with quarter pipes, then kick across onto the belfry balcony and ring the bell |
+| 28 Hoop Dreams | Leisure centre | Sponsor's hoops (the fire hoop pays double) take money off the bill; finish in the stunt airbag |
+| 29 Drop Zone | Office tower | Down from 9 m a level at a time with trap boards and quarter pipes into a crash mat rated for 4 m |
 
 Controls:
 - **Desktop:** click two dots to place a piece; hold and drag through dots to lay a chain of tubes. Drag empty space to pan, right-drag to orbit, wheel to zoom (or WASD/arrows and the on-screen pad). Ctrl+Z undoes.
@@ -44,13 +54,13 @@ Plain JavaScript + [three.js](https://threejs.org) (loaded from a CDN), no build
 
 | Path | What |
 | --- | --- |
-| `src/events.js` | The special jobs (hoist, party, zip wire, chute, BMX, sleigh, fireworks, launch) and the people who climb up for them |
+| `src/events.js` | The special jobs (hoist, party, zip wire, chute, BMX, sleigh, fireworks, launch) and the people who climb up for them. The BMX rider model is stepped at a fixed rate and drives both the live run and the design-time prediction |
 | `src/engine.js` | 2D XPBD structural sim (members, semi-rigid couplers, base plates, ties, buckling, board capacity) and the trial runner: construction sequence, Dave's deliveries, chav AI |
-| `src/levels.js` | The 24 jobs |
+| `src/levels.js` | The 24 jobs and the 5 bonus jobs |
 | `src/g1_world.js` … `src/g4_game.js` | Renderer, scenery, people/ragdolls/police, UI and game flow |
 | `src/shell.html` | Page markup and CSS |
 | `build.py` | Bundles everything into `dist/index.html` (artifact body) and `docs/index.html` (standalone page for GitHub Pages) |
-| `test/` | Headless tests: `node test/refs.mjs` runs a reference solution for every job (all must pass); `naive.mjs`, `chavs.mjs`, `trap.mjs` check failure cases |
+| `test/` | Headless tests: `node test/refs.mjs` runs a reference solution for every job (all must pass); `naive.mjs`, `chavs.mjs`, `trap.mjs` check failure cases; `bmx.mjs` prints Tyler's predicted line for each BMX design |
 
 ```sh
 python3 build.py          # rebuild dist/ and docs/

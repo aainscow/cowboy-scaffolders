@@ -39,15 +39,171 @@ export function hoistLanding(sim, level, wx, w = 0.8) {
   }
   return best;
 }
-// Where the BMX lands: ride right from the start along real boards, launch off the end.
-export function bmxFlight(sim, level, E) {
-  const zy = level.zones[0].y;
-  const run = boardRun(sim, zy, E.start + 0.3);
-  if (!run) return null;
-  const h = zy + 0.15 - level.groundAt(run.x1 + 2);
-  const vy = E.hop, v = E.v;
-  const t = (vy + Math.sqrt(vy * vy + 2 * GRAV * h)) / GRAV;
-  return { launch: run.x1, land: run.x1 + v * t };
+// ---------------------------------------------------------------------------
+//  The BMX. One rider model, stepped at a fixed rate, drives both the live
+//  run and the design-time prediction (the dotted line and the checklist), so
+//  what the checklist promises is what happens, unless the scaffold gives way.
+// ---------------------------------------------------------------------------
+export const RAMP = { cost: 25, vy: 5 };      // kicker: launches him up and on
+export const QPIPE = { cost: 35, vy: 5.5 };   // quarter pipe: straight up, back down the way he came
+export const BMX_DT = 1 / 120;
+export const BMX_MASS = 85;
+export function bmxSpec(level) {
+  const E = level.event, z = level.zones[0];
+  const start = typeof E.start === 'number' ? { x: E.start, y: z.y, dir: 1 } : { y: z.y, dir: 1, ...E.start };
+  const finish = E.finish || { kind: 'ground', x0: E.pool[0], x1: E.pool[1], y: 0.3, prop: 'pool', label: 'paddling pool' };
+  return { start, v: E.v ?? 6, hop: E.hop ?? 0.8, finish, hoops: E.hoops || [], obstacles: E.obstacles || [], drain: E.drain || null, maxDrop: E.maxDrop ?? 3.5 };
+}
+// What the rider can touch: boards (real or trap), fixed ledges, and the kit on the joints.
+export function bmxWorld(sim, level, pieces) {
+  const B = bmxSpec(level), E = level.event;
+  const ledges = [];
+  if (B.finish.kind === 'ledge') ledges.push({ ...B.finish, finish: true });
+  for (const l of E.ledges || []) ledges.push(l);
+  const lv = new Set(sim.boards.map(b => b.gy));
+  for (const l of ledges) lv.add(l.y);
+  const at = (type) => { const m = new Map(); for (const q of pieces) if (q.type === type) m.set(q.a[0] + ',' + q.a[1], q); return m; };
+  const hatch = pieces.find(q => q.type === 'hatch');
+  const broken = new Set();
+  return {
+    B, level, broken, ledges, levels: [...lv].sort((a, b) => b - a), ramps: at('ramp'), qpipes: at('qpipe'), hatchX: hatch ? hatch.a[0] : null,
+    surf(x, gy) {
+      for (const l of ledges) if (l.y === gy && x >= l.x0 - 1e-9 && x <= l.x1 + 1e-9) return { ledge: l };
+      let best = null;
+      for (const bd of sim.boards) {
+        if (bd.broken || broken.has(bd.id) || bd.gy !== gy || x < bd.x0 - 1e-6 || x > bd.x1 + 1e-6) continue;
+        if (!best || (best.type.id === 'trap' && bd.type.id !== 'trap')) best = bd;
+      }
+      return best ? { bd: best, trap: best.type.id === 'trap' } : null;
+    },
+  };
+}
+export function bmxNew(B) {
+  return { mode: 'ride', x: B.start.x + B.start.dir * 0.3, y: B.start.y, gy: B.start.y, dir: B.start.dir, vx: 0, vy: 0, peak: B.start.y, t: 0, air: 0, bt: 0, qp: false, hoops: new Set(), out: null };
+}
+function bmxFly(s, vx, vy, x) { s.mode = 'fly'; s.vx = vx; s.vy = vy; s.x = x; s.y = s.gy; s.peak = s.y; s.air = 0; }
+function bmxEnd(s, out) { s.mode = 'done'; s.out = out; }
+// Advance the rider by dt. Returns what happened (usually nothing).
+export function bmxStep(W, s, dt) {
+  const B = W.B, L = W.level, ev = [];
+  s.t += dt;
+  if (s.t > 45 && s.mode !== 'done') { bmxEnd(s, { kind: 'bored', x: s.x, y: s.y }); ev.push({ what: 'bored', x: s.x, y: s.y }); return ev; }
+  if (s.mode === 'ride') {
+    const x0 = s.x;
+    s.x += s.dir * B.v * dt;
+    // kit on the joints he rolls over
+    const lo = Math.min(x0, s.x), hi = Math.max(x0, s.x);
+    for (let gx = Math.ceil(lo - 1e-9); gx <= hi + 1e-9; gx++) {
+      if (Math.abs(gx - x0) < 1e-9) continue;
+      const k = gx + ',' + s.gy;
+      if (W.ramps.has(k)) { bmxFly(s, s.dir * B.v, RAMP.vy, gx); ev.push({ what: 'kick', x: gx, y: s.gy }); return ev; }
+      if (W.qpipes.has(k)) { bmxFly(s, 0, QPIPE.vy, gx - s.dir * 0.05); s.qp = true; ev.push({ what: 'qpipe', x: gx, y: s.gy }); return ev; }
+    }
+    const su = W.surf(s.x, s.gy);
+    const edge = s.dir > 0 ? Math.floor(s.x + 1e-9) : Math.ceil(s.x - 1e-9);
+    if (!su) { bmxFly(s, s.dir * B.v, B.hop, edge); ev.push({ what: 'launch', x: edge, y: s.gy }); return ev; }
+    if (su.trap) { W.broken.add(su.bd.id); ev.push({ what: 'trap', x: edge, y: s.gy, bd: su.bd.id }); bmxFly(s, s.dir * B.v, 0, edge); return ev; }
+    if (su.ledge && su.ledge.finish) { bmxEnd(s, { kind: 'finish', x: s.x, y: s.gy }); ev.push({ what: 'finish', x: s.x, y: s.gy }); }
+    return ev;
+  }
+  if (s.mode === 'basement') {
+    s.bt += dt;
+    if (s.bt > 1.5) {
+      const D = B.drain;
+      s.gy = L.groundAt(D.x); s.dir = Math.sign(D.vx) || s.dir;
+      bmxFly(s, D.vx, D.vy, D.x);
+      s.drained = true;
+      ev.push({ what: 'drain', x: D.x, y: s.gy });
+    }
+    return ev;
+  }
+  if (s.mode !== 'fly') return ev;
+  const y0 = s.y;
+  s.vy -= GRAV * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.air += dt;
+  s.peak = Math.max(s.peak, s.y);
+  B.hoops.forEach((h, i) => {
+    if (!s.hoops.has(i) && Math.hypot(s.x - h.x, s.y + 0.6 - h.y) < (h.r ?? 0.6)) { s.hoops.add(i); ev.push({ what: 'hoop', i, x: h.x, y: h.y, cash: h.cash }); }
+  });
+  for (const o of B.obstacles) {
+    if (s.x > o.x0 && s.x < o.x1 && s.y < o.y1 && s.y + 1.2 > o.y0) { bmxEnd(s, { kind: 'crash', why: 'obstacle', label: o.label, x: s.x, y: s.y }); ev.push({ what: 'crash', x: s.x, y: s.y }); return ev; }
+  }
+  // coming down onto a platform (he goes up through them: no ceilings in BMX)
+  if (s.vy < 0) for (const gy of W.levels) {
+    if (!(y0 >= gy - 1e-9 && s.y < gy)) continue;
+    const su = W.surf(s.x, gy);
+    if (!su) continue;
+    if (su.trap) { W.broken.add(su.bd.id); ev.push({ what: 'trap', x: s.x, y: gy, bd: su.bd.id }); continue; }
+    const drop = s.peak - gy;
+    s.y = gy; s.gy = gy;
+    if (su.ledge && su.ledge.finish) { bmxEnd(s, { kind: 'finish', x: s.x, y: gy, drop }); ev.push({ what: 'finish', x: s.x, y: gy }); return ev; }
+    if (drop > B.maxDrop + 1e-6) { bmxEnd(s, { kind: 'crash', why: 'drop', drop, x: s.x, y: gy }); ev.push({ what: 'crash', x: s.x, y: gy }); return ev; }
+    s.mode = 'ride';
+    if (s.qp) { s.dir = -s.dir; s.qp = false; }
+    ev.push({ what: 'land', x: s.x, y: gy, drop, ledge: su.ledge ? su.ledge.label : null });
+    return ev;
+  }
+  // the finish (a pool, a skip, a mat) has sides as well as a top
+  const F = B.finish;
+  if (F.kind === 'ground' && s.x >= F.x0 && s.x <= F.x1 && s.y <= F.y) {
+    const drop = s.peak - F.y;
+    if (y0 <= F.y) { bmxEnd(s, { kind: 'crash', why: 'side', x: s.x, y: s.y }); ev.push({ what: 'crash', x: s.x, y: s.y }); }
+    else if (F.maxDrop && drop > F.maxDrop + 1e-6) { bmxEnd(s, { kind: 'crash', why: 'soft', drop, x: s.x, y: F.y }); ev.push({ what: 'crash', x: s.x, y: F.y }); }
+    else { s.y = F.y; bmxEnd(s, { kind: 'finish', x: s.x, y: F.y, drop }); ev.push({ what: 'finish', x: s.x, y: F.y }); }
+    return ev;
+  }
+  const g = L.groundAt(s.x);
+  if (s.y <= g) {
+    s.y = g;
+    if (W.hatchX !== null && B.drain && Math.abs(s.x - W.hatchX) <= 0.55) { s.mode = 'basement'; s.bt = 0; s.x = W.hatchX; s.vx = 0; s.vy = 0; ev.push({ what: 'hatch', x: W.hatchX, y: g }); }
+    else { bmxEnd(s, { kind: 'crash', why: 'ground', x: s.x, y: g }); ev.push({ what: 'crash', x: s.x, y: g }); }
+  }
+  return ev;
+}
+const m1 = (x) => (Math.round(x * 10) / 10).toString();
+// The whole run, worked out in advance. Path segments break where he goes down the drain.
+export function bmxPredict(sim, level, pieces) {
+  const W = bmxWorld(sim, level, pieces), B = W.B;
+  const s = bmxNew(B);
+  const su = W.surf(s.x, s.gy);
+  if (!su || su.trap) return null;
+  const segs = [[[s.x, s.y]]], evs = [];
+  let n = 0;
+  while (s.mode !== 'done' && n < 50 / BMX_DT) {
+    const e = bmxStep(W, s, BMX_DT);
+    for (const x of e) evs.push(x);
+    if (e.some(x => x.what === 'drain')) segs.push([]);
+    if (s.mode !== 'basement' && (n % 3 === 0 || e.length || s.mode === 'done')) segs[segs.length - 1].push([s.x, s.y]);
+    n++;
+  }
+  if (!s.out) s.out = { kind: 'bored', x: s.x, y: s.y };
+  return { out: s.out, segs, evs, hoops: s.hoops, B, hatchX: W.hatchX, cash: [...s.hoops].reduce((a, i) => a + (B.hoops[i].cash || 0), 0) };
+}
+// What the checklist says about the predicted run.
+export function bmxSummary(P, level) {
+  const B = P.B, F = B.finish, parts = [];
+  for (const e of P.evs) {
+    if (e.what === 'kick') parts.push(`kicker at ${e.x} m`);
+    else if (e.what === 'qpipe') parts.push(`quarter pipe at ${e.x} m`);
+    else if (e.what === 'trap') parts.push(`through the trap board at ${m1(e.x)} m`);
+    else if (e.what === 'launch') parts.push(`off the end at ${m1(e.x)} m`);
+    else if (e.what === 'land') parts.push(e.ledge ? `onto the ${e.ledge}` : `lands on the ${e.y} m platform`);
+    else if (e.what === 'hatch') parts.push('down the trap door');
+    else if (e.what === 'drain') parts.push('out of the drain');
+  }
+  const o = P.out;
+  let end;
+  if (o.kind === 'finish') end = `${F.kind === 'ledge' ? 'onto' : 'into'} the ${F.label}`;
+  else if (o.kind === 'bored') end = 'round and round until he gets bored';
+  else if (o.why === 'drop') end = `lands on the ${o.y} m platform from ${m1(o.drop)} m up: too far (${B.maxDrop} m max)`;
+  else if (o.why === 'soft') end = `drops ${m1(o.drop)} m into the ${F.label}: it's only good for ${F.maxDrop} m`;
+  else if (o.why === 'obstacle') end = `straight into the ${o.label}`;
+  else if (o.why === 'side') end = `into the side of the ${F.label}`;
+  else if (B.drain && P.evs.every(e => e.what !== 'drain')) end = P.hatchX === null ? `lands at ${m1(o.x)} m, and there's no trap door` : `lands at ${m1(o.x)} m, ${m1(Math.abs(o.x - P.hatchX))} m from the trap door`;
+  else if (F.kind === 'ground') end = `lands at ${m1(o.x)} m: ${o.x < F.x0 ? 'short of' : 'past'} the ${F.label} (${m1(F.x0)}–${m1(F.x1)} m)`;
+  else end = `hits the ground at ${m1(o.x)} m`;
+  parts.push(end);
+  const s = parts.join(' → ');
+  return s[0].toUpperCase() + s.slice(1);
 }
 // Sleigh stopping distance on snowy boards.
 export function sleighNeeds(E) { return E.v * E.v / (2 * E.mu * GRAV) + 0.9; }
@@ -55,7 +211,7 @@ export function sleighNeeds(E) { return E.v * E.v / (2 * E.mu * GRAV) + 0.9; }
 // Checklist lines + whether the job can go ahead at all.
 export function eventChecks(level, sim, pieces) {
   const E = level.event, out = [];
-  let ok = true;
+  let ok = true, bmx = null;
   if (!E) return { checks: out, ok };
   const z = level.zones[0];
   if (E.type === 'hoist') {
@@ -74,10 +230,13 @@ export function eventChecks(level, sim, pieces) {
     else if (n.gx >= E.skip[0] && n.gx <= E.skip[1]) out.push([true, 'Rubble chute runs into the skip']);
     else out.push([false, `The chute misses the skip (skip is at ${E.skip[0]}–${E.skip[1]} m)`]);
   } else if (E.type === 'bmx') {
-    const f = bmxFlight(sim, level, E);
-    if (!f) { ok = false; out.push([false, `Tyler needs boards to ride out onto at ${E.start} m, ${z.y} m up`]); }
-    else if (f.land >= E.pool[0] && f.land <= E.pool[1]) out.push([true, `Tyler launches at ${f.launch} m and lands in the pool at ${f.land.toFixed(1)} m`]);
-    else out.push([false, `Tyler launches at ${f.launch} m and lands at ${f.land.toFixed(1)} m: ${f.land < E.pool[0] ? 'short of' : 'past'} the pool (${E.pool[0]}–${E.pool[1]} m)`]);
+    const P = bmxPredict(sim, level, pieces), B = bmxSpec(level);
+    bmx = P;
+    if (!P) { ok = false; out.push([false, `Tyler needs real boards to ride out onto at ${B.start.x} m, ${B.start.y} m up`]); }
+    else {
+      out.push([P.out.kind === 'finish', `Tyler: ${bmxSummary(P, level)}`]);
+      if (B.hoops.length) { const got = [...P.hoops].reduce((a, i) => a + B.hoops[i].cash, 0); out.push([P.hoops.size === B.hoops.length, `Sponsor's hoops: ${P.hoops.size} of ${B.hoops.length}${got ? ` (+£${got})` : ''}`]); }
+    }
   } else if (E.type === 'sleigh') {
     const run = boardRun(sim, z.y, z.x0 + 0.5);
     const need = sleighNeeds(E);
@@ -90,7 +249,7 @@ export function eventChecks(level, sim, pieces) {
   } else if (E.type === 'launch') {
     out.push(['info', 'The astronaut climbs to the capsule, then the rocket blast hits the scaffold']);
   }
-  return { checks: out, ok };
+  return { checks: out, ok, bmx };
 }
 
 // ---------------------------------------------------------------------------
@@ -353,52 +512,78 @@ function chuteUpdate(E, ev, dt) {
 }
 
 function bmxStart(E, ev) {
-  const L = this.level, zy = L.zones[0].y;
-  const r = { who: 'tyler', style: 'tyler', name: 'Tyler', visible: true, x: E.start, y: zy, u: E.start + 0.3, state: 'appear', mode: 'walk', face: 1, t: 0, onBoard: -1, onLadder: -1, onMember: -1, load: null, gy: zy, bike: true };
-  this.visitors.push(r); ev.r = r; ev.v = E.v;
+  const W = bmxWorld(this.sim, this.level, this.pieces), B = W.B;
+  const s = bmxNew(B);
+  const r = { who: 'tyler', style: 'tyler', name: 'Tyler', visible: true, x: B.start.x, y: B.start.y, u: s.x, state: 'appear', mode: 'walk', face: B.start.dir, t: 0, onBoard: -1, onLadder: -1, onMember: -1, load: null, gy: B.start.y, bike: true };
+  this.visitors.push(r); ev.r = r; ev.W = W; ev.s = s; ev.acc = 0; ev.impact = 0; ev.drop = 0;
   this.builder.state = 'watch';
-  this.events.push({ type: 'bmx', what: 'appear', x: E.start, y: zy });
+  this.events.push({ type: 'bmx', what: 'appear', x: B.start.x, y: B.start.y });
 }
 function bmxUpdate(E, ev, dt) {
-  const r = ev.r, sim = this.sim, L = this.level;
-  if (r.state === 'falling' || r.state === 'flat') return;
+  const r = ev.r, s = ev.s, W = ev.W, B = W.B, sim = this.sim;
+  if (r.state === 'falling' || r.state === 'flat' || r.state === 'gone') return;
   r.t += dt;
   if (r.state === 'appear') {
-    this._placeOnBoard(r, r.gy, 85);
+    r.u = s.x;
+    const su = W.surf(s.x, s.gy);
+    if (!su || !su.bd || su.trap) { this._fall(r, 0, 0); this.fail("Tyler's start platform has gone", null, true); return; }
+    this._setLoad(r, { kind: 'board', board: su.bd.id, t: Math.max(0, Math.min(1, s.x - su.bd.x0)), mass: BMX_MASS });
+    r.onBoard = su.bd.id; r.x = s.x; r.y = sim.nodes[su.bd.a].y;
     if (r.t > 1.4) { r.state = 'ride'; r.t = 0; this.events.push({ type: 'bmx', what: 'go' }); }
-  } else if (r.state === 'ride') {
-    r.u += ev.v * dt;
-    const bd = sim.boardUnder(r.u, r.gy);
-    if (!bd || bd.broken) {
-      // off the end: fly
-      this._setLoad(r, null); r.onBoard = -1;
-      r.state = 'fly'; r.vx = ev.v; r.vy = E.hop; r.x = r.u; r.y = r.gy + 0.12; r.t = 0; r.spin = 0;
-      this.events.push({ type: 'bmx', what: 'launch', x: r.x });
-      return;
+    return;
+  }
+  if (r.state === 'finish') {
+    if (r.t > 3) { r.state = 'gone'; r.visible = false; this._eventEnd(); }
+    return;
+  }
+  ev.acc += dt;
+  while (ev.acc >= BMX_DT && s.mode !== 'done') {
+    ev.acc -= BMX_DT;
+    for (const e of bmxStep(W, s, BMX_DT)) {
+      this.events.push({ type: 'bmx', ...e, prop: B.finish.prop });
+      if (e.what === 'trap') { this._setLoad(r, null); r.onBoard = -1; const bd = sim.boards[e.bd]; if (bd && !bd.broken) sim.breakBoard(bd, 'trap'); }
+      if (e.what === 'hoop' && e.cash) this.charges.push({ what: "Sponsor's hoops", cost: -e.cash });
+      if (e.what === 'land') { ev.impact = 0.3; ev.drop = e.drop; }
+      if (e.what === 'kick') { const n = sim.nodeAt(e.x, e.y); if (n) { ev.kick = { kind: 'node', node: n.id, mass: BMX_MASS * 1.8 }; sim.loads.push(ev.kick); ev.kickT = 0.15; } }
     }
-    const bump = 1.25 + 0.2 * Math.sin(r.u * 6);
-    this._placeOnBoard(r, r.gy, 85 * bump, 60);
-  } else if (r.state === 'fly') {
-    r.vy -= GRAV * dt; r.x += r.vx * dt; r.y += r.vy * dt; r.spin += dt * 6;
-    // landing on another platform?
-    if (r.vy < 0) for (const gy of [...new Set(sim.boards.map(b => b.gy))]) {
-      if (r.y - r.vy * dt >= gy + 0.1 && r.y < gy + 0.1) {
-        const bd = sim.boardUnder(r.x, gy);
-        if (bd && !bd.broken) { r.gy = gy; r.u = r.x; r.state = 'ride'; r.t = 0; this.events.push({ type: 'bmx', what: 'land', x: r.x }); return; }
-      }
-    }
-    const g = L.groundAt(r.x);
-    if (r.y <= g) {
-      r.y = g;
-      if (r.x >= E.pool[0] && r.x <= E.pool[1]) { r.state = 'splash'; r.t = 0; r.visible = true; this.events.push({ type: 'bmx', what: 'splash', x: r.x }); }
-      else {
-        r.state = 'flat'; this.events.push({ type: 'bmx', what: 'crash', x: r.x });
-        const d = r.x < E.pool[0] ? E.pool[0] - r.x : r.x - E.pool[1];
-        this.fail(`Tyler missed the paddling pool by ${d.toFixed(1)} m. He's fine. His mum isn't.`, null, true);
-      }
-    }
-  } else if (r.state === 'splash') {
-    if (r.t > 2.5) { r.state = 'gone'; r.visible = false; this._eventEnd(); }
+    if (s.mode === 'done') break;
+  }
+  if (ev.kick && (ev.kickT -= dt) <= 0) { this._removeLoad(ev.kick); ev.kick = null; }
+  r.face = s.mode === 'fly' && s.vx ? Math.sign(s.vx) : s.dir;
+  if (s.mode === 'ride') {
+    r.state = 'ride'; r.visible = true;
+    const su = W.surf(s.x, s.gy);
+    if (!su || su.ledge || su.trap) { this._setLoad(r, null); r.onBoard = -1; r.x = s.x; r.y = s.gy; return; }
+    // sit on the board the rider model is using (never a trap board he's about to find out about)
+    r.u = s.x;
+    ev.impact = Math.max(0, ev.impact - dt);
+    const bump = 1.25 + 0.2 * Math.sin(s.x * 6) + (ev.impact > 0 ? (1.3 + 0.5 * ev.drop) * ev.impact / 0.3 : 0);
+    const bd = su.bd, na = sim.nodes[bd.a], nb = sim.nodes[bd.b], t = Math.max(0, Math.min(1, s.x - bd.x0));
+    r.x = na.x + (nb.x - na.x) * t; r.y = na.y + (nb.y - na.y) * t; r.zy = s.gy;
+    r.onBoard = bd.id; r.onLadder = -1; r.onMember = -1;
+    this._setLoad(r, { kind: 'board', board: bd.id, t, mass: BMX_MASS * bump, fx: 60 * s.dir });
+  } else if (s.mode === 'fly') {
+    if (r.onBoard >= 0 || r.load) { this._setLoad(r, null); r.onBoard = -1; }
+    r.state = 'fly'; r.visible = true; r.x = s.x; r.y = s.y; r.vy = s.vy;
+  } else if (s.mode === 'basement') {
+    r.state = 'basement'; r.visible = false; r.x = s.x; r.y = s.y;
+  } else if (s.mode === 'done') {
+    const o = s.out;
+    r.x = s.x; r.y = s.y; r.visible = true;
+    if (o.kind === 'finish') { r.state = 'finish'; r.onLedge = B.finish.kind === 'ledge'; r.t = 0; this._setLoad(r, null); r.onBoard = -1; return; }
+    const F = B.finish;
+    let msg;
+    if (o.kind === 'bored') msg = 'Tyler went round in circles until he got bored and went home.';
+    else if (o.why === 'drop') msg = `Tyler dropped ${(Math.round(o.drop * 10) / 10)} m onto the ${o.y} m platform. He's fine. The bike isn't.`;
+    else if (o.why === 'soft') msg = `Tyler dropped ${(Math.round(o.drop * 10) / 10)} m into the ${F.label}, and it's only good for ${F.maxDrop} m. He's fine. His mum isn't.`;
+    else if (o.why === 'obstacle') msg = `Tyler rode straight into the ${o.label}. He's fine. The ${o.label} isn't.`;
+    else if (o.why === 'side') msg = `Tyler hit the side of the ${F.label}. He's fine. His mum isn't.`;
+    else if (B.drain && !s.drained) msg = W.hatchX === null ? "Tyler came down on the pavement: there was no trap door. He's fine. His mum isn't." : `Tyler missed the trap door by ${Math.abs(o.x - W.hatchX).toFixed(1)} m. He's fine. His mum isn't.`;
+    else if (F.kind === 'ground') { const d = o.x < F.x0 ? F.x0 - o.x : o.x - F.x1; msg = `Tyler missed the ${F.label} by ${d.toFixed(1)} m. He's fine. His mum isn't.`; }
+    else msg = `Tyler never made the ${F.label}. He's fine. His mum isn't.`;
+    if (o.kind === 'bored') { r.state = 'gone'; r.visible = false; }
+    else this._fall(r, (s.vx || 0) * 0.5, 1.5);
+    this.fail(msg, null, true);
   }
 }
 

@@ -350,7 +350,7 @@ function animatePerson(g, p, dt, t) {
   const moving = Math.hypot(p.x - A.lastX, p.y - A.lastY, pz - (A.lastZ ?? pz)) / Math.max(dt, 1e-4);
   A.lastX = p.x; A.lastY = p.y; A.lastZ = pz;
   const riding = p.bike && (p.state === 'appear' || p.state === 'ride' || p.state === 'fly');
-  const st = p.dance ? 'dance' : (p.state === 'zip' || p.state === 'swinghang') ? 'hang' : riding ? 'ride' : p.state;
+  const st = p.dance ? 'dance' : (p.state === 'zip' || p.state === 'swinghang') ? 'hang' : riding ? 'ride' : p.state === 'finish' ? 'waving' : p.state;
   const onBoard = p.onBoard >= 0 && p.mode !== 'climb';
   const mode = ['dump', 'waving', 'watch', 'spray', 'bounce', 'hang', 'rattle', 'rant', 'scared', 'haul', 'ride', 'dance'].includes(st) ? st : p.mode;
   const cuffed = st === 'cuffed';
@@ -363,7 +363,8 @@ function animatePerson(g, p, dt, t) {
   if (mode === 'bounce') { y = p.y + 0.125 + (p.hop || 0) * 0.35; zT = Z_MID; yawT = Math.sin(t * 3) * 0.6; }
   if (mode === 'hang') { zT = Z_OUT + 0.3; yawT = Math.PI; }
   if (mode === 'haul') { yawT = Math.PI; }
-  if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52; yawT = Math.PI / 2; }
+  if (mode === 'ride') { zT = Z_MID; y = p.y + 0.52 + (p.state === 'fly' ? 0 : 0.11); yawT = p.face < 0 ? -Math.PI / 2 : Math.PI / 2; }
+  if (p.state === 'finish') { zT = Z_MID + 0.2; y = p.y + (p.onLedge ? 0.02 : 0.11); }
   let move = 0;
   if (mode === 'dance') {
     move = ((p.id || 0) * 7 + Math.floor(((p.beat || t * 12) / (2 * Math.PI)) / 8)) % 6;
@@ -1381,11 +1382,16 @@ function eventView(tr, L, dt, t) {
         eventPieces.chute.position.set(n.x - eventPieces.chute.userData.x, n.y - eventPieces.chute.userData.y, 0);
       }
     }
-    if (E.type === 'bmx' && ev.r && ev.r.visible && ev.r.state !== 'flat' && ev.r.state !== 'gone') {
-      const r = ev.r;
+    if (E.type === 'bmx' && ev.r && ev.r.visible && ev.r.state !== 'flat' && ev.r.state !== 'gone' && ev.r.state !== 'falling') {
+      const r = ev.r, s = ev.s;
       bike.visible = true;
-      bike.position.set(r.x, r.y, Z_MID);
-      bike.rotation.set(0, 0, r.state === 'fly' ? Math.max(-0.5, Math.min(0.35, (r.vy || 0) * 0.08)) : 0);
+      if (r.state === 'finish') { bike.position.set(r.x + 0.55, r.y + 0.02, Z_MID - 0.2); bike.rotation.set(0, 0.6, 0.15); }
+      else {
+        const fly = r.state === 'fly';
+        bike.position.set(r.x, r.y + (fly ? 0 : 0.11), Z_MID);
+        const pitch = !fly ? 0 : s && s.vx === 0 ? Math.sign(r.vy || 0) * 1.25 : Math.max(-0.5, Math.min(0.35, (r.vy || 0) * 0.08));
+        bike.rotation.set(0, r.face < 0 ? Math.PI : 0, pitch);
+      }
     }
     if (E.type === 'sleigh' && ev.s && ev.s.state !== 'gone') {
       const s = ev.s;

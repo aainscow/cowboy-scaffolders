@@ -223,7 +223,8 @@ const save = (() => {
 // Dev shortcut: add ?dev or #dev to the URL (e.g. .../cowboy-scaffolders/?dev#job20) to open every job.
 // Nothing is saved, so progress is untouched once you drop it from the URL.
 const DEV = /[?#&]dev\b/i.test(location.search + location.hash);
-const unlocked = (i) => DEV || i === 0 || (save.d.stars[LEVELS[i - 1].id] || 0) > 0 || (save.d.stars[LEVELS[i].id] || 0) > 0;
+const BONUS_AFTER = 18;   // Tyler's stunt tour opens once Pedal Power is done
+const unlocked = (i) => DEV || i === 0 || (LEVELS[i].bonus ? (save.d.stars[BONUS_AFTER] || 0) > 0 : (save.d.stars[LEVELS[i - 1].id] || 0) > 0) || (save.d.stars[LEVELS[i].id] || 0) > 0;
 
 const $ = (id) => document.getElementById(id);
 const glz = () => (S.L && S.L.glazier) || GLAZIER;
@@ -248,6 +249,8 @@ const ICON = {
   wheel: '<svg viewBox="0 0 34 34"><circle cx="17" cy="12" r="7" fill="none" stroke="#dfe4e8" stroke-width="3"/><path d="M17 5v14M10 12h14" stroke="#dfe4e8" stroke-width="1.4"/><path d="M11 13v16M23 13v10" stroke="#c8b48a" stroke-width="2"/><rect x="18" y="23" width="10" height="7" rx="1" fill="#b6b2a8"/></svg>',
   zip: '<svg viewBox="0 0 34 34"><rect x="3" y="6" width="7" height="7" fill="#ff7a1a"/><path d="M8 9 L31 24" stroke="#dfe4e8" stroke-width="2"/><circle cx="20" cy="17" r="2.5" fill="#f3d40b"/><path d="M20 19v7M17 22h6" stroke="#f3d40b" stroke-width="2"/></svg>',
   chute: '<svg viewBox="0 0 34 34"><path d="M8 4h8l-2 8h-5zM9 12h6l-2 8h-5zM10 20h6l-2 8h-5z" fill="#ff7a1a"/><rect x="16" y="24" width="15" height="7" rx="1" fill="#f0b90b"/></svg>',
+  ramp: '<svg viewBox="0 0 34 34"><path d="M3 27h28l-8-10h-12z" fill="#d9b27a"/><path d="M3 27l8-10h12l8 10" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M8 13q9-12 18 0" fill="none" stroke="#ff2d8a" stroke-width="2" stroke-dasharray="3 2"/></svg>',
+  qpipe: '<svg viewBox="0 0 34 34"><path d="M4 29h26V7h-3q0 19-23 19z" fill="#d9b27a"/><path d="M27 7q0 19-23 19" fill="none" stroke="#ff7a1a" stroke-width="2"/><path d="M22 18V4M22 4l-3 4M22 4l3 4" stroke="#ff2d8a" stroke-width="2" fill="none" stroke-linecap="round"/></svg>',
   protect: '<svg viewBox="0 0 34 34"><rect x="6" y="5" width="22" height="24" fill="#2a3440" stroke="#f6f5f0" stroke-width="2"/><rect x="4" y="8" width="26" height="18" rx="1" fill="#d9b27a" transform="rotate(-8 17 17)"/><g fill="#6b4e2e"><circle cx="8" cy="12" r="1.2"/><circle cx="27" cy="9" r="1.2"/><circle cx="8" cy="26" r="1.2"/><circle cx="28" cy="23" r="1.2"/></g></svg>',
   order: '<svg viewBox="0 0 34 34"><circle cx="9" cy="9" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="9" y="12.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">1</text><circle cx="25" cy="25" r="6" fill="#161b21" stroke="#fff" stroke-width="1.2"/><text x="25" y="28.2" font-size="9" text-anchor="middle" fill="#f3d40b" font-family="Arial" font-weight="700">2</text><path d="M13 13l8 8" stroke="#f3d40b" stroke-width="2.2" stroke-linecap="round"/><path d="M21 16v5h-5" stroke="#f3d40b" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>',
 };
@@ -258,11 +261,13 @@ const TOOLS = [
   { id: 'deck', name: 'Steel deck', price: `£${BOARDS.deck.cost}/m · ${BOARDS.deck.cap} kg`, key: '4', req: 'deck' },
   { id: 'ladder', name: 'Ladder', price: `£${LADDER.cost}/m · up to ${LADDER.maxLen} m`, key: '5' },
   { id: 'lock', name: 'Ladder lock', price: `£${LOCK.cost} · keeps chavs off`, key: '6', req: 'chavs' },
-  { id: 'trap', name: 'Trap board', price: `£${BOARDS.trap.cost}/m · gives way under anyone`, key: 't', req: 'chavs' },
+  { id: 'trap', name: 'Trap board', price: `£${BOARDS.trap.cost}/m · gives way under anyone`, key: 't', req: 'toolTrap' },
   { id: 'hatch', name: 'Trap door', price: `£${HATCH.cost} · for the Drain Gobbler`, key: 'h', req: 'toolHatch' },
   { id: 'wheel', name: 'Gin wheel', price: '£45 · haul loads up on a rope', key: 'g', req: 'toolWheel' },
   { id: 'zip', name: 'Zip anchor', price: '£60 · where the wire starts', key: 'z', req: 'toolZip' },
   { id: 'chute', name: 'Rubble chute', price: '£40 · hangs off a board end', key: 'c', req: 'toolChute' },
+  { id: 'ramp', name: 'Kicker', price: `£${RAMP.cost} · throws Tyler up and on`, key: 'k', req: 'toolRamp' },
+  { id: 'qpipe', name: 'Quarter pipe', price: `£${QPIPE.cost} · up, and back the way he came`, key: 'p', req: 'toolQpipe' },
   { id: 'protect', name: 'Board up', price: `£${BOARDUP.cost} a window · glazier £${glz()}`, key: '0' },
   { id: 'tie', name: 'Wall tie', price: `£${TIE.cost} each`, key: '7' },
   { id: 'order', name: 'Build order', price: 'Click pieces in order', key: '8' },
@@ -280,6 +285,8 @@ const NEW_KIT = {
   wheel: `A <b>gin wheel</b> (£45) for hauling loads up on a rope. Fit it to a joint at platform height or above, where the rope can hang clear to the ground: usually on an arm sticking out past the end. The rope pulls down with twice the load.`,
   zip: `A <b>zip wire anchor</b> (£60). Fix it to a joint at platform level next to a board. The wire runs to the pub and pulls that joint sideways, hardest when a rider is halfway across.`,
   chute: `A <b>rubble chute</b> (£40). Hang it off a joint at the end of the platform boards. It drops straight down, so it has to be over the skip.`,
+  ramp: `A <b>kicker</b> (£${RAMP.cost}): a little plywood funbox that sits on the boards over a joint. When Tyler rolls over it, either way, it throws him up about 1¼ m and on about 6 m before he's back at the same height.`,
+  qpipe: `A <b>quarter pipe</b> (£${QPIPE.cost}) for the very end of a run of boards. Tyler goes straight up it, about 1½ m, and comes back down going the other way. If there are boards over it 1 m higher, he lands on those instead.`,
 };
 const kitSeenThisSession = new Set();
 function introduceKit() {
@@ -305,6 +312,7 @@ function renderTools() {
   const pub = L.house.style === 'pub';
   el.innerHTML = TOOLS.filter(t => toolAvailable(t, L)).map(t => pub && t.id === 'protect' ? { ...t, name: 'Awning', price: `£${BOARDUP.cost} a window · no plywood at the pub` } : t).map(t => {
     const dis = false;
+    if (t.id === 'hatch' && !L.monster) t = { ...t, price: `£${HATCH.cost} · Tyler drops in, comes out the drain` };
     const price = dis ? (t.id === 'tie' ? 'Not allowed here' : t.id === 'lock' ? 'No chavs on this job' : t.id === 'hatch' ? (L.monster === 'hide' ? 'No digging here' : 'Nothing in the drains here') : ['wheel', 'zip', 'chute'].includes(t.id) ? 'Not on this job' : 'Later jobs') : t.price;
     return `<button class="tool${S.tool === t.id ? ' on' : ''}" data-tool="${t.id}" ${dis ? 'disabled' : ''} id="tool-${t.id}">${pub && t.id === 'protect' ? ICON.awning : ICON[t.id]}<span class="tn">${t.name}<kbd>${t.key}</kbd></span><span class="tp">${price}</span></button>`;
   }).join('') + `<hr><div class="mini"><button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button><button id="clearBtn" title="Remove everything">Clear</button></div><div class="mini"><button id="orderBtn" class="${S.showOrder ? 'on' : ''}" title="List the order the crew puts pieces up, and change it">Order list</button></div>`;
@@ -360,12 +368,17 @@ const TERRY = [
   "Twelve metres, glass everywhere, and wind like a train. Welcome to London.",
   "Twelve guests, nine metres up. If it wobbles, tell the DJ to slow it down.",
   "It's a rocket. How hard can it be? Don't answer that.",
+  "Two vans and a skip. If he hits a van, it's not our van.",
+  "What goes down a trap door comes out of a drain. That's just plumbing.",
+  "Up is harder than down. Charge accordingly.",
+  "Every hoop's money off the bill. Tell him to go through them all.",
+  "Nine metres, one kid, one mattress. Do it in stages.",
 ];
 function windowAt(pt) {
   const ws = S.L.house.windows || [];
   return ws.findIndex(w => pt.x > w.x - 0.25 && pt.x < w.x + w.w + 0.25 && pt.y > w.y - 0.25 && pt.y < w.y + w.h + 0.25);
 }
-const PNAME = { trap: 'Trap board', protect: 'Window board', tube: 'Tube', heavy: 'Heavy tube', board: 'Boards', deck: 'Steel deck', tie: 'Wall tie', ladder: 'Ladder', lock: 'Ladder lock' };
+const PNAME = { ramp: 'Kicker', qpipe: 'Quarter pipe', wheel: 'Gin wheel', zip: 'Zip wire anchor', chute: 'Rubble chute', hatch: 'Trap door', trap: 'Trap board', protect: 'Window board', tube: 'Tube', heavy: 'Heavy tube', board: 'Boards', deck: 'Steel deck', tie: 'Wall tie', ladder: 'Ladder', lock: 'Ladder lock' };
 function pieceDesc(p) {
   if (p.type === 'tube' || p.type === 'heavy') {
     const dx = p.b[0] - p.a[0], dy = p.b[1] - p.a[1];
@@ -426,10 +439,12 @@ function updateHelp() {
     ladder: '<b>Click</b> the foot (ground or a boarded platform), then the top. The top must land on boards. Dave only climbs ladders.',
     trap: `<b>Click or drag</b> along a tube to lay a fake board. It looks real but gives way under anyone. A chav who drops ${SAFE_FALL} m or less lies there dazed and the police pay ${fmt(TRAP_REWARD)} for them. Any higher and you get sued. Dave avoids trap boards if there's another way up.`,
     protect: S.L && S.L.house.style === 'pub' ? `<b>Click</b> a window to put a striped canvas awning over it (£${BOARDUP.cost}). The landlord won't have plywood on his pub, but an awning catches anything dropped from above. Windows marked ⚠ are in the firing line.` : `<b>Click</b> a window to screw plywood over it (£${BOARDUP.cost}). Dumping ${WINDOW_BREAK_KG} kg or more in front of a window puts a brick through it (£${glz()} glazier). Windows marked ⚠ are in the firing line.`,
-    hatch: `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
+    hatch: S.L && !S.L.monster ? `<b>Click</b> the pavement to dig a trap door (${fmt(HATCH.cost)}). If Tyler lands on it he drops into the secret basement and shoots out of the storm drain.` : `<b>Click</b> the pavement to dig a trap door into a secret basement (${fmt(HATCH.cost)}). The Drain Gobbler comes up the drain on the left after dark and heads straight for Dave. If it walks over the trap door, down it goes and back to the Underneath. If not, it eats Dave and the agency charges ${fmt(NEW_BUILDER)} for Jeff.`,
     wheel: '<b>Click</b> a joint at platform height or above to fit the gin wheel. The rope must hang clear to the ground, so put it on an arm sticking out past the scaffold. Loads are swung onto the nearest board within 1.5 m.',
     zip: '<b>Click</b> a joint at platform level, next to a board, to anchor the zip wire. The wire runs to the pub and pulls that joint sideways, hard.',
     chute: '<b>Click</b> a joint at the end of the platform boards to hang the rubble chute. It drops straight down, so it has to be over the skip.',
+    ramp: `<b>Click</b> a joint on the boards to put down a kicker (£${RAMP.cost}). Tyler goes over it either way and gets thrown up and on. The dotted line shows where he'll go.`,
+    qpipe: `<b>Click</b> the joint at the very end of a run of boards for a quarter pipe (£${QPIPE.cost}). Tyler goes straight up and comes back down the other way, onto boards 1 m higher if there are any over it.`,
     lock: '<b>Click</b> any ladder to lock it. Chavs can\'t climb locked ladders, and Dave has the key.',
     order: '<b>Click pieces in the order you want them put up</b>, starting from #1. Anything you don\'t click keeps its place after. Use the order list to fine-tune.',
     erase: '<b>Click</b> any piece to remove it.',
@@ -467,6 +482,24 @@ function afterEdit() {
   refreshOrderLabels();
   renderOrderPanel();
 }
+// Tyler's predicted line through the air, in the design view.
+let bmxLine = null;
+const bmxLineMat = new THREE.LineDashedMaterial({ color: 0xff2d8a, dashSize: 0.18, gapSize: 0.12, transparent: true, opacity: 0.95, depthTest: false });
+function drawBmxLine(P) {
+  if (bmxLine) { overlay.remove(bmxLine); bmxLine.traverse(o => o.geometry && o.geometry.dispose()); bmxLine = null; }
+  clearLabels('bmx');
+  if (!P || S.mode !== 'design') return;
+  bmxLine = new THREE.Group(); bmxLine.renderOrder = 8;
+  for (const seg of P.segs) {
+    if (seg.length < 2) continue;
+    const g = new THREE.BufferGeometry().setFromPoints(seg.map(([x, y]) => new THREE.Vector3(x, y + 0.45, Z_MID)));
+    const l = new THREE.Line(g, bmxLineMat); l.computeLineDistances(); l.renderOrder = 8; bmxLine.add(l);
+  }
+  overlay.add(bmxLine);
+  const o = P.out, ok = o.kind === 'finish';
+  addLabel('bmx' + (ok ? ' ok' : ' bad'), ok ? '✓ Tyler' : '✗ Tyler', o.x, o.y + 1.2, Z_MID, 'bmx');
+  if (P.evs.some(e => e.what === 'hatch')) { const h = P.evs.find(e => e.what === 'drain'); if (h) addLabel('bmx', '↑ drain', h.x, h.y + 0.9, Z_MID, 'bmx'); }
+}
 function refreshRiskLabels() {
   clearLabels('risk');
   if (S.mode !== 'design') return;
@@ -501,10 +534,11 @@ function refreshDocket() {
   const ties = S.pieces.filter(p => p.type === 'tie').length;
   $('spent').textContent = fmt(cost);
   $('budget').textContent = 'of ' + fmt(L.budget) + ' quote';
-  $('profit').textContent = cost <= L.budget ? `Profit ${fmt(L.budget - cost)}` : `Loss ${fmt(cost - L.budget)}`;
-  $('profit').classList.toggle('neg', cost > L.budget);
+  const hoopCash = req.bmx ? req.bmx.cash : 0, netCost = cost - hoopCash;
+  $('profit').textContent = (netCost <= L.budget ? `Profit ${fmt(L.budget - netCost)}` : `Loss ${fmt(netCost - L.budget)}`) + (hoopCash ? ` with ${fmt(hoopCash)} hoop money` : '');
+  $('profit').classList.toggle('neg', netCost > L.budget);
   const f = $('barFill');
-  const frac = cost / L.budget;
+  const frac = netCost / L.budget;
   f.style.width = Math.min(100, frac * 100) + '%';
   f.style.background = frac > 1 ? 'var(--danger)' : frac > 0.85 ? 'var(--hivis-yellow)' : 'var(--safe)';
   $('tieCount').textContent = L.maxTies === 0 ? 'No ties allowed' : L.maxTies < 99 ? `Ties ${ties} / ${L.maxTies}` : `Ties ${ties}`;
@@ -540,8 +574,10 @@ function refreshDocket() {
   if (S.risk && S.risk.size) items.push([unprot === 0, unprot === 0 ? (L.house.style === 'pub' ? 'Awnings over the windows in the firing line' : 'Windows in the firing line boarded') : `${unprot} window${unprot > 1 ? 's' : ''} at risk: £${glz()} each if smashed`]);
   for (const [ok, t] of req.event || []) items.push([ok, t]);
   if (L.monster === 'hide') items.push(['info', "Churchyard: no trap doors. Dave will climb up and pull his ladder up. The Gobbler will shake the scaffold"]);
-  if (L.toolHatch) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
-  items.push([frac <= 1, frac <= 1 ? `Under the quote by ${fmt(L.budget - cost)}` : `Over the quote by ${fmt(cost - L.budget)}`]);
+  if (L.toolHatch && L.monster) items.push(S.pieces.some(p => p.type === 'hatch') ? [true, 'Trap door set for the Drain Gobbler'] : [false, `No trap door: the Drain Gobbler eats Dave (${fmt(NEW_BUILDER)} for a new builder)`]);
+  const cash = req.bmx ? req.bmx.cash : 0, net = cost - cash;
+  items.push([net <= L.budget, net <= L.budget ? `Under the quote by ${fmt(L.budget - net)}${cash ? ` after ${fmt(cash)} of hoop money` : ''}` : `Over the quote by ${fmt(net - L.budget)}${cash ? ` even after ${fmt(cash)} of hoop money` : ''}`]);
+  drawBmxLine(req.bmx);
   $('checks').innerHTML = items.map(([ok, t]) => `<li class="${ok === 'info' ? 'info' : ok ? 'ok' : ''}">${t}</li>`).join('');
   const b = $('buildBtn');
   b.disabled = !S.pieces.length;
@@ -602,7 +638,7 @@ function pieceAt(pt) {
     if (p.type === 'tie') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.12;
     else if (p.type === 'protect') { const w = S.L.house.windows[p.a[0]]; d = w ? Math.hypot(pt.x - w.x - w.w / 2, pt.y - w.y - w.h / 2) - 0.45 : 9; }
     else if (p.type === 'lock') d = Math.hypot(pt.x - p.a[0] - LAD_OFF, pt.y - p.a[1] - 0.75) - 0.35;
-    else if (p.type === 'wheel' || p.type === 'zip' || p.type === 'chute') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1]) - 0.2;
+    else if (p.type === 'wheel' || p.type === 'zip' || p.type === 'chute' || p.type === 'ramp' || p.type === 'qpipe') d = Math.hypot(pt.x - p.a[0], pt.y - p.a[1] - 0.25) - 0.25;
     else if (p.type === 'hatch') d = pt.y < p.a[1] + 0.8 ? Math.abs(pt.x - p.a[0]) - 0.45 : 9;
     else if (p.type === 'ladder') d = segDist(pt.x, pt.y, p.a[0] + LAD_OFF, p.a[1], p.b[0] + LAD_OFF, p.b[1] + 1) - 0.1;
     else if (p.type === 'board' || p.type === 'deck' || p.type === 'trap') d = segDist(pt.x, pt.y, p.a[0] + 0.1, p.a[1] + 0.14, p.b[0] - 0.1, p.b[1] + 0.14) - 0.05;
@@ -814,7 +850,7 @@ window.addEventListener('pointerup', (ev) => {
   } else if (tool === 'protect' && moved < 8) {
     const i = windowAt(pt);
     if (i >= 0) tryPlace({ type: 'protect', a: [i, 0] }); else toast('Click a window to board it up');
-  } else if ((tool === 'wheel' || tool === 'zip' || tool === 'chute') && moved < 8) {
+  } else if ((tool === 'wheel' || tool === 'zip' || tool === 'chute' || tool === 'ramp' || tool === 'qpipe') && moved < 8) {
     const n = nearestNode(pt);
     if (n) tryPlace({ type: tool, a: n });
   } else if (tool === 'tie' && moved < 8) {
@@ -876,12 +912,12 @@ function updateDesignHover() {
       if (err) setTip(err, true, seg.a[0] + 0.5, seg.a[1]);
       else setTip(`${BOARDS[tool].name} · ${fmt(BOARDS[tool].cost)} · holds ${BOARDS[tool].cap} kg`, false, seg.a[0] + 0.5, seg.a[1]);
     }
-  } else if (tool === 'wheel' || tool === 'zip' || tool === 'chute') {
+  } else if (tool === 'wheel' || tool === 'zip' || tool === 'chute' || tool === 'ramp' || tool === 'qpipe') {
     const n = nearestNode(pt);
     if (n) {
       const err = validatePlacement(S.L, S.pieces, { type: tool, a: n });
       hoverRing.visible = true; hoverRing.position.set(n[0], n[1], Z_OUT + 0.02); hoverRing.material.color.set(err ? 0xff4d3a : 0xff7a1a);
-      const name = { wheel: 'Gin wheel · £45', zip: 'Zip wire anchor · £60', chute: 'Rubble chute · £40' }[tool];
+      const name = { wheel: 'Gin wheel · £45', zip: 'Zip wire anchor · £60', chute: 'Rubble chute · £40', ramp: `Kicker · £${RAMP.cost}`, qpipe: `Quarter pipe · £${QPIPE.cost}` }[tool];
       setTip(err || name, !!err, n[0], n[1]);
     }
   } else if (tool === 'tie') {
@@ -919,7 +955,7 @@ function updateDesignHover() {
     const x = Math.max(0, Math.min(S.L.W, Math.round(pt.x)));
     const err = validatePlacement(S.L, S.pieces, { type: 'hatch', a: [x, S.L.groundCol(x)] });
     hoverRing.visible = true; hoverRing.position.set(x, S.L.groundCol(x), Z_OUT + 0.02); hoverRing.material.color.set(err ? 0xff4d3a : 0xb04dff);
-    setTip(err || `Trap door · ${fmt(HATCH.cost)} · drops the Drain Gobbler into the secret basement`, !!err, x, S.L.groundCol(x) + 0.6);
+    setTip(err || `Trap door · ${fmt(HATCH.cost)} · ${S.L.monster ? 'drops the Drain Gobbler into the secret basement' : 'Tyler drops in and comes out of the drain'}`, !!err, x, S.L.groundCol(x) + 0.6);
   } else if (tool === 'protect') {
     const i = windowAt(pt);
     if (i >= 0) {
@@ -953,13 +989,21 @@ function show(id, on = true) { $(id).hidden = !on; }
 function hudDesign(on) { for (const id of ['job', 'docket', 'tools', 'go', 'corner', 'help', 'campad']) show(id, on); if (!on) $('orderPanel').hidden = true; }
 
 function frameCamera(L, instant = false) {
-  const target = new THREE.Vector3(0, Math.max(2.2, L.H * 0.46), 1.2);
+  // BMX jobs: get the finish, the hoops and anything in the way into the shot too
+  let x0 = 0, x1 = L.W, yTop = L.H;
+  if (L.event && L.event.type === 'bmx') {
+    const B = bmxSpec(L), xs = [B.finish.x0, B.finish.x1, ...B.hoops.map(h => h.x), ...B.obstacles.flatMap(o => [o.x0, o.x1]), ...(B.drain ? [B.drain.x] : [])];
+    x0 = Math.min(0, ...xs) - 0.5; x1 = Math.max(L.W, ...xs) + 0.5;
+    yTop = Math.max(L.H, (B.finish.y || 0) + 2, ...B.hoops.map(h => h.y + 1));
+  }
+  const W = x1 - x0;
+  const target = new THREE.Vector3((x0 + x1) / 2 - L.W / 2, Math.max(2.2, yTop * 0.46), 1.2);
   const aspect = window.innerWidth / window.innerHeight;
   const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), th = tv * aspect;
   const narrow = window.innerWidth < 760;
-  const dist = Math.max((L.W / 2 + 1.5) / th * (narrow ? 0.62 : 0.85), (L.H / 2 + 2.6) / tv) + (narrow ? 3 : 6.5);
+  const dist = Math.max((W / 2 + 1.5) / th * (narrow ? 0.62 : 0.85), (yTop / 2 + 2.6) / tv) + (narrow ? 3 : 6.5);
   if (narrow) target.x -= 0.7;
-  const pos = new THREE.Vector3(dist * Math.sin(0.14), target.y + dist * 0.1, target.z + dist * Math.cos(0.14));
+  const pos = new THREE.Vector3(target.x + dist * Math.sin(0.14), target.y + dist * 0.1, target.z + dist * Math.cos(0.14));
   S.camGoal = { target, pos, t: 0 };
   if (instant) { controls.target.copy(target); camera.position.copy(pos); S.camGoal = null; }
 }
@@ -1010,6 +1054,10 @@ function openBrief() {
   if (L.monster) facts.push('<span class="chip bad">Something in the drains</span>');
   if (L.night) facts.push('<span class="chip">Night job</span>');
   if (L.snow) facts.push('<span class="chip">Snow</span>');
+  if (L.bonus) facts.push('<span class="chip">Bonus job</span>');
+  if (L.toolRamp) facts.push('<span class="chip">Kickers</span>');
+  if (L.toolQpipe) facts.push('<span class="chip">Quarter pipes</span>');
+  if (L.event && L.event.type === 'bmx' && L.toolHatch) facts.push('<span class="chip">Trap door</span>');
   if (L.glazier) facts.push(`<span class="chip warn">Glass £${L.glazier} a pane</span>`);
   if (L.wind) facts.push(`<span class="chip warn">Wind: ${L.wind + L.gust > 35 ? 'strong gusts' : 'breezy'}</span>`);
   if (L.maxTies === 0) facts.push('<span class="chip bad">No wall ties</span>'); else if (L.maxTies < 99) facts.push(`<span class="chip">Max ${L.maxTies} wall ties</span>`);
@@ -1020,12 +1068,13 @@ function openBrief() {
     <div class="kicker">Job ${String(L.id).padStart(2, '0')} · ${L.client}</div>
     <h2>${L.name}</h2>
     <p>${L.brief}</p>
-    <div class="loads"><span class="h">Dave will carry up</span><span class="h" style="text-align:right">Weight</span><span class="h" style="text-align:right">Height</span>${loads}</div>
+    ${L.deliveries.length ? `<div class="loads"><span class="h">Dave will carry up</span><span class="h" style="text-align:right">Weight</span><span class="h" style="text-align:right">Height</span>${loads}</div>` : ''}
     <div class="facts">${facts.join('')}${best ? `<span class="chip">Your best ${fmt(best)}</span>` : ''}</div>
     <p class="tipline">${L.tip}</p>
     ${S.risk && S.risk.size ? `<p class="tipline">Anything over ${WINDOW_BREAK_KG} kg dumped in front of a window puts a brick through it: £${glz()} to the glazier, or £${BOARDUP.cost} to board it up first. ${S.risk.size} window${S.risk.size > 1 ? 's are' : ' is'} in the firing line on this job.</p>` : ''}
     ${L.chavs ? `<p class="tipline chav">After Dave's done, ${L.chavs > 1 ? L.chavs + ' local lads' : 'a local lad'} will turn up to swing on your tubes and climb any ladder that isn't locked. Every tag on the house costs ${fmt(TAG_COST)} to clean off. You don't have to lock them out: lay <b>trap boards</b> where they'll walk. A chav who drops ${SAFE_FALL} m or less gets carted off by the police, who pay ${fmt(TRAP_REWARD)} each. Drop one further than that and you get sued.</p>` : ''}
     ${L.monster ? `<p class="tipline chav">There's something living in the drains round here. After dark the <b>Drain Gobbler</b> crawls out of the manhole and goes looking for Dave. Dig a <b>trap door</b> (${fmt(HATCH.cost)}) in the pavement and it drops into the secret basement and gets sent back to the Underneath. No trap door and it eats Dave, and the agency charges ${fmt(NEW_BUILDER)} to send Jeff.</p>` : ''}
+    ${L.event && L.event.type === 'bmx' && L.bonus ? `<p class="tipline">Tyler rides at a steady 6 m/s. He can drop ${bmxSpec(L).maxDrop} m onto boards before something breaks${bmxSpec(L).finish.maxDrop ? `, and the ${bmxSpec(L).finish.label} is good for ${bmxSpec(L).finish.maxDrop} m` : ''}. The dotted pink line shows exactly where he'll go.</p>` : ''}
     <p class="terry"><b>Big Terry:</b> “${TERRY[L.id - 1]}”</p>
     <div class="row"><button class="big ghost" id="briefBack">Job sheet</button><button class="big" id="briefGo">${S.pieces.length ? 'Back to it' : 'Start the job'}</button></div>`;
   hudDesign(false);
@@ -1071,7 +1120,8 @@ function openSelect() {
   const cards = LEVELS.map((d, i) => {
     const st = save.d.stars[d.id] || 0, best = save.d.best[d.id];
     const open = unlocked(i);
-    return `<button class="card" data-i="${i}" ${open ? '' : 'disabled'} id="card-${d.id}">
+    const head = d.bonus && !LEVELS[i - 1].bonus ? `<div class="sect"><b>Bonus jobs</b> · Tyler's stunt tour${open ? '' : ` · opens when job ${String(BONUS_AFTER).padStart(2, '0')} is done`}</div>` : '';
+    return `${head}<button class="card${d.bonus ? ' bonus' : ''}" data-i="${i}" ${open ? '' : 'disabled'} id="card-${d.id}">
       <span class="cn num">${String(d.id).padStart(2, '0')}</span>
       <span class="ct">${d.name}</span>
       <span class="cc">${d.client}</span>
@@ -1112,7 +1162,7 @@ function startTest() {
   tipLabel.visible = false;
   overlay.visible = false;
   for (const l of labels) if (l.group === 'design') l.visible = false;
-  clearLabels('order'); clearLabels('risk');
+  clearLabels('order'); clearLabels('risk'); clearLabels('bmx');
   show('tools', false); show('help', false); $('orderPanel').hidden = true;
   $('buildBtn').hidden = true; $('speed').hidden = false; $('stopBtn').hidden = false;
   show('status');
@@ -1143,7 +1193,7 @@ function eventStatus(tr) {
     case 'party': return ['Party', ev.partyT < 0 ? `Guests arriving: ${up} of ${E.guests} up` : ev.partyT <= E.dur ? `Dancing! ${Math.max(0, E.dur - ev.partyT).toFixed(0)} s to go` : 'Everyone going home'];
     case 'zip': { const r = V.find(v => v.state === 'zip'); const c = V.find(v => v.state !== 'gone' && v.state !== 'wait'); return ['Zip wire', r ? `${r.name} is on the wire!` : c ? `${c.name} is climbing up` : 'All across']; }
     case 'chute': return ['Stripping the roof', ev.stage === 'fall' ? `Bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length}: down the chute` : `The roofers are throwing down bag ${Math.min(ev.i + 1, E.bags.length)} of ${E.bags.length} of old slates`];
-    case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', splash: 'SPLASH!' }[r.state] || '']; }
+    case 'bmx': { const r = ev.r; return ['BMX', { appear: 'Tyler is lining up', ride: 'Tyler is pedalling flat out', fly: 'AIRBORNE!', basement: 'Down the trap door…', finish: 'NAILED IT!', falling: 'Oh dear', flat: 'Oh dear' }[r.state] || '']; }
     case 'sleigh': { const st = ev.s.state; return ['Christmas Eve', { fly: 'Sleigh on approach…', slide: 'Touchdown! Braking…', parked: 'Parked. Presents going down the chimney', takeoff: 'And away!' }[st] || '']; }
     case 'fireworks': return ['Bonfire Night', ev.lit ? (ev.fired < E.rockets ? `Rocket ${ev.fired} of ${E.rockets}` : 'Grand finale done') : 'Terry is climbing up with a lighter'];
     case 'launch': return ['Launch', ev.stage === 'climb' ? 'The astronaut is climbing up' : ev.stage === 'count' ? `T minus ${ev.n}` : ev.stage === 'lift' ? (ev.rocketY < 0.2 ? 'Main engines building up…' : ev.nozzleY < 14 ? `LIFT-OFF! Exhaust blasting the tower at ${Math.max(0, ev.nozzleY).toFixed(0)} m` : 'Clearing the tower…') : 'Clear of the tower'];
@@ -1160,7 +1210,7 @@ function testStatus() {
   if (!tr) return;
   const b = tr.builder;
   const it = b.carrying ? `${b.carrying.def.name.toLowerCase()} (${kg(b.carrying.def.mass)})` : '';
-  if (tr.result && !tr.result.ok) return status(tr.result.sued ? 'Sued' : 'Collapse', tr.result.reason, true);
+  if (tr.result && !tr.result.ok) return status(tr.result.sued ? 'Sued' : tr.result.soft && S.L.event && S.L.event.type === 'bmx' ? 'Wipeout' : 'Collapse', tr.result.reason, true);
   if (tr.phase === 'event' && tr.ev) return status(...eventStatus(tr));
   if (tr.phase === 'monster' && tr.monster) {
     const st = tr.monster.state;
@@ -1211,6 +1261,7 @@ function showResult() {
   const charges = (tr.result && tr.result.ok) ? tr.charges : [];
   const chargeTotal = charges.reduce((a, c) => a + c.cost, 0);
   const chargeLines = {}; for (const c of charges) chargeLines[c.what] = (chargeLines[c.what] || 0) + c.cost;
+  const badCharges = Object.fromEntries(Object.entries(chargeLines).filter(([, v]) => v > 0));
   const cost = materials + tags * TAG_COST + smashed * glz() + (eaten ? NEW_BUILDER : 0) + chargeTotal - reward;
   const stood = tr.result && tr.result.ok && !tr.unfinished;
   const unfinished = tr.result && tr.result.ok && tr.unfinished;
@@ -1226,7 +1277,7 @@ function showResult() {
     sfx.fanfare();
   } else sfx.wah();
   const next = S.li + 1 < LEVELS.length;
-  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed || eaten || chargeTotal) && materials <= L.budget ? `It stood, but ${[smashed && `the glazier (${fmt(smashed * glz())})`, tags && `the graffiti clean-up (${fmt(tags * TAG_COST)})`, eaten && `hiring Jeff after Dave got eaten (${fmt(NEW_BUILDER)})`, chargeTotal && Object.entries(chargeLines).map(([k, v]) => `${k.toLowerCase()} (${fmt(v)})`).join(' and ')].filter(Boolean).join(' and ')} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
+  const reason = unfinished ? "The platform or Dave's ladder wasn't finished, so Dave never went up. Nobody's paying for that." : sued ? `${tr.result.reason} Their mum's already got a no-win-no-fee solicitor.` : !stood ? tr.result.reason : (tags || smashed || eaten || Object.keys(badCharges).length) && materials <= L.budget ? `It stood, but ${[smashed && `the glazier (${fmt(smashed * glz())})`, tags && `the graffiti clean-up (${fmt(tags * TAG_COST)})`, eaten && `hiring Jeff after Dave got eaten (${fmt(NEW_BUILDER)})`, Object.keys(badCharges).length && Object.entries(badCharges).map(([k, v]) => `${k.toLowerCase()} (${fmt(v)})`).join(' and ')].filter(Boolean).join(' and ')} ate the profit.` : `It stood, but you spent ${fmt(cost - L.budget)} more than the quote. Terry's docking your wages.`;
   const band = ok ? ['Safe for use*', '*as far as Terry knows'] : unfinished ? ['Not finished', 'No platform, no pay'] : sued ? ['Sued', 'See you in court'] : stood ? ['Not paid', 'Over the quote'] : ['Do not use', 'Scaffold incomplete'];
   const kills = trappedN;
   if (kills) { save.d.chavKills = (save.d.chavKills || 0) + kills; save.write(); }
@@ -1238,7 +1289,7 @@ function showResult() {
       <span class="k">Materials</span><span class="v num">${fmt(materials)}</span>
       ${reward ? `<span class="k">Police reward</span><span class="v num bonus">+${fmt(reward)} (${trappedN} chav${trappedN > 1 ? 's' : ''})</span>` : ''}
       ${smashed ? `<span class="k">Glazier</span><span class="v num">${fmt(smashed * glz())} (${smashed} window${smashed > 1 ? 's' : ''})</span>` : ''}
-      ${Object.entries(chargeLines).map(([k, v]) => `<span class="k">${k}</span><span class="v num">${fmt(v)}</span>`).join('')}
+      ${Object.entries(chargeLines).map(([k, v]) => v < 0 ? `<span class="k">${k}</span><span class="v num bonus">+${fmt(-v)}</span>` : `<span class="k">${k}</span><span class="v num">${fmt(v)}</span>`).join('')}
       ${eaten ? `<span class="k">New builder</span><span class="v num">${fmt(NEW_BUILDER)} (Dave got eaten)</span>` : ''}
       ${tr.result && tr.result.monsterTrapped ? `<span class="k">Drain Gobbler</span><span class="v bonus">Back in the Underneath</span>` : ''}
       ${tags ? `<span class="k">Graffiti</span><span class="v num">${fmt(tags * TAG_COST)} (${tags} tag${tags > 1 ? 's' : ''})</span>` : ''}
@@ -1270,7 +1321,7 @@ function knockPeople(tr, hitters, L) {
   const hitBy = (x, y, z) => hitters.find(h => Math.abs(h.x - x) < 0.45 && h.y > y - 0.1 && h.y < y + 1.9 && Math.abs(h.z - z) < 0.9);
   const engine = [[tr.builder, tr.builder.who === 'agency' ? kevin : dave], ...tr.chavs.map((c, i) => [c, chavMesh(i)]), ...tr.visitors.map(v => [v, visitorMesh(v)])];
   for (const [p, mesh] of engine) {
-    if (!p.visible || !mesh.visible || p.ragdolled || ['falling', 'flat', 'gone', 'zip'].includes(p.state)) continue;
+    if (!p.visible || !mesh.visible || p.ragdolled || p.bike || ['falling', 'flat', 'gone', 'zip'].includes(p.state)) continue;   // Tyler's too quick for falling junk
     const h = hitBy(p.x, p.y, mesh.position.z);
     if (!h || h.src === p) continue;
     p.tangled = false; p.knocked = true;
@@ -1440,10 +1491,25 @@ function eventFx(ev, L, tr) {
     if (ev.what === 'car') { sfx.glass(); sfx.thud(200); say("THE BISHOP'S CAR!", ev.x, 2.4, 'sued', 2); puff(ev.x, 1.2, 3.6, 10, 0.7, 0x7a7266); S.shake = Math.max(S.shake, 0.12); }
     if (ev.what === 'mess') { sfx.thud(150); puff(ev.x, 0.4, Z_MID, 8, 0.6, 0x7a7266); }
   } else if (ev.type === 'bmx') {
-    if (ev.what === 'appear') say('SEND IT!', ev.x, zy + 2.2);
-    if (ev.what === 'launch') { say('WAHEYYY!', ev.x, zy + 2.2, 'bonus'); sfx.snap(); }
-    if (ev.what === 'splash') { say('SPLOOSH!', ev.x, 2.2, 'bonus', 2.2); for (let i = 0; i < 4; i++) puff(ev.x + (Math.random() - 0.5), 0.5, Z_MID, 6, 0.7, 0x9fe0ff); sfx.splat(); sfx.fanfare(); }
-    if (ev.what === 'crash') { say('OOF!', ev.x, 2, 'sued'); sfx.splat(); }
+    const hy = ev.y ?? zy;
+    if (ev.what === 'appear') say('SEND IT!', ev.x, hy + 2.2);
+    if (ev.what === 'launch') { say(['WAHEYYY!', 'YEEEW!', 'BRAAAP!'][Math.floor(Math.random() * 3)], ev.x, hy + 2.2, 'bonus'); sfx.snap(); }
+    if (ev.what === 'kick') { say(['AIR!', 'TAILWHIP!', 'NO HANDER!'][Math.floor(Math.random() * 3)], ev.x, hy + 2.4, 'bonus'); sfx.snap(); }
+    if (ev.what === 'qpipe') { say(['UP IT!', 'FAKIE!', 'BOOST!'][Math.floor(Math.random() * 3)], ev.x, hy + 2.8, 'bonus'); sfx.snap(); }
+    if (ev.what === 'land') { sfx.thud(80 + 60 * (ev.drop || 0)); puff(ev.x, hy + 0.15, Z_MID, 4, 0.35, 0xc8b89a); }
+    if (ev.what === 'trap') { sfx.crack(); say('CRACK!', ev.x + 0.5, hy + 0.8); }
+    if (ev.what === 'hoop') { const h = bmxProps.hoops[ev.i]; if (h) h.got = 1.2; say(`+${fmt(ev.cash)}`, ev.x, ev.y + 0.9, 'bonus', 1.6); sfx.fanfare(); }
+    if (ev.what === 'hatch') { const h = hatchViews.find(v => Math.abs(v.x - ev.x) < 0.1); if (h) { h.target = 1; h.glowT = 2.5; setTimeout(() => { h.target = 0; }, 1800); } sfx.thunk(); say('DOWN THE HATCH!', ev.x, hy + 2, 'bonus', 2); }
+    if (ev.what === 'drain') { sfx.portal(); for (let i = 0; i < 6; i++) puff(ev.x + (Math.random() - 0.5) * 0.5, hy + 0.2 + i * 0.35, Z_MID, 5, 0.6, 0x9fe0ff); say('WHOOSH!', ev.x, hy + 2.2, 'bonus', 2); S.shake = Math.max(S.shake, 0.06); }
+    if (ev.what === 'finish') {
+      const p = ev.prop;
+      if (p === 'pool') { say('SPLOOSH!', ev.x, hy + 2, 'bonus', 2.2); for (let i = 0; i < 4; i++) puff(ev.x + (Math.random() - 0.5), hy + 0.3, Z_MID, 6, 0.7, 0x9fe0ff); sfx.splat(); }
+      else if (p === 'balcony') { say('DING DONG!', ev.x, hy + 2.8, 'bonus', 3); if (bmxProps.bell) bmxProps.bell.ring = 1; for (let i = 0; i < 6; i++) setTimeout(() => sfx.clank(0.6), i * 420); }
+      else { say(p === 'skip' ? 'BOOF!' : 'FWUMPH!', ev.x, hy + 2, 'bonus', 2.2); puff(ev.x, hy + 0.2, Z_MID, 8, 0.6, p === 'skip' ? 0xe8e2d4 : 0xcfe0ff); sfx.thud(150); }
+      setTimeout(() => sfx.fanfare(), 400);
+    }
+    if (ev.what === 'crash') { say('OOF!', ev.x, hy + 2, 'sued'); sfx.splat(); S.shake = Math.max(S.shake, 0.08); }
+    if (ev.what === 'bored') say('Boring. I\'m going home.', ev.x, hy + 2, 'sued', 2.5);
   } else if (ev.type === 'sleigh') {
     if (ev.what === 'bells') { for (let i = 0; i < 8; i++) sfx.clank(0.25); say('♪ jingle jingle ♪', 0, zy + 4, 'bonus', 2.5); }
     if (ev.what === 'touchdown') { sfx.thud(420); S.shake = Math.max(S.shake, 0.15); say('SKRRRRR', ev.x, zy + 1.8); }

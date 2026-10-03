@@ -73,7 +73,7 @@ const RAW = {
 export const REFS = Object.fromEntries(Object.entries({ ...RAW, ...RAW2 }).map(([id, f]) => [id, () => {
   const L = prepLevel(LEVELS.find(l => l.id === parseInt(id)));
   const ps = [...f(), ...[...windowsAtRisk(L)].map(i => ({ type: 'protect', a: [i, 0] }))];
-  if (L.toolHatch) {   // a trap door on the first free bit of pavement
+  if (L.toolHatch && L.monster) {   // a trap door on the first free bit of pavement
     const hx = [...Array(L.W + 1).keys()].find(x => !validatePlacement(L, ps, { type: 'hatch', a: [x, L.groundCol(x)] }));
     ps.push({ type: 'hatch', a: [hx, L.groundCol(hx)] });
   }

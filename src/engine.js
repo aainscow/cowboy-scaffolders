@@ -3,7 +3,7 @@
 //  Pure logic, no rendering. Units: metres, kilograms, seconds, newtons.
 // ============================================================================
 
-import { eventMixin, eventChecks } from './events.js';
+import { eventMixin, eventChecks, RAMP, QPIPE } from './events.js';
 export const GRAV = 9.81;
 
 export const MATS = {
@@ -95,7 +95,10 @@ export function prepLevel(def) {
   };
   L.evType = L.event ? L.event.type : null;
   L.toolWheel = L.evType === 'hoist'; L.toolZip = L.evType === 'zip'; L.toolChute = L.evType === 'chute';
-  L.toolHatch = !!L.monster && L.monster !== 'hide';
+  const E = L.event || {};
+  L.toolHatch = (!!L.monster && L.monster !== 'hide') || !!E.hatch;
+  L.toolRamp = !!E.ramps; L.toolQpipe = !!E.qpipes;
+  L.toolTrap = L.chavs > 0 || !!E.traps;
   L.canBase = (gx) => !L.noBase.some(([a, b]) => gx >= a && gx <= b);
   L.inForbidden = (x, y) => L.forbidden.some(f => x > f.x0 + 1e-6 && x < f.x1 - 1e-6 && y > f.y0 + 1e-6 && y < f.y1 - 1e-6);
   L.onForbiddenEdgeOrIn = (x, y) => L.forbidden.some(f => x >= f.x0 - 1e-6 && x <= f.x1 + 1e-6 && y >= f.y0 - 1e-6 && y <= f.y1 + 1e-6 && !(Math.abs(y - f.y0) < 1e-6 && f.y0 <= L.groundCol(x)));
@@ -125,6 +128,8 @@ export function pieceCost(p) {
   if (p.type === 'wheel') return 45;
   if (p.type === 'zip') return 60;
   if (p.type === 'chute') return 40;
+  if (p.type === 'ramp') return RAMP.cost;
+  if (p.type === 'qpipe') return QPIPE.cost;
   return 0;
 }
 function baseCostFor(p) { return 0; }
@@ -778,6 +783,16 @@ export function validatePlacement(level, pieces, p) {
     if (!boardAt(x - 1, y) && !boardAt(x, y)) return 'The chute needs boards next to it';
     return null;
   }
+  if (p.type === 'ramp' || p.type === 'qpipe') {
+    if (!L[p.type === 'ramp' ? 'toolRamp' : 'toolQpipe']) return 'Not on this job';
+    const [x, y] = p.a;
+    if (!nodeSet.has(x + ',' + y)) return 'Fix it to a joint on a platform';
+    const l = boardSet.has((x - 1) + ',' + y), r = boardSet.has(x + ',' + y);
+    if (!l && !r) return 'It sits on the boards: pick a joint next to a board';
+    if (p.type === 'qpipe' && l && r) return 'A quarter pipe goes at the very end of a run of boards';
+    if (pieces.some(q => (q.type === 'ramp' || q.type === 'qpipe') && q.a[0] === x && q.a[1] === y)) return 'Already something there';
+    return null;
+  }
   if (p.type === 'hatch') {
     if (!L.toolHatch) return L.monster === 'hide' ? 'Consecrated ground: no digging' : 'Nothing down the drains on this job';
     const x = p.a[0];
@@ -856,7 +871,7 @@ export function checkRequirements(level, pieces) {
     if (plan && plan.overloads.length) heavy.push({ delivery: i, item: d.item, carry: plan.carry, x: d.x, y: level.zones[d.zone].y, trap: plan.overloads.some(o => o.trap) });
   });
   const ev = eventChecks(level, sim, pieces);
-  return { zones, heavy, event: ev.checks, ok: zones.every(z => z.boarded && z.reachable) && ev.ok };
+  return { zones, heavy, event: ev.checks, bmx: ev.bmx, ok: zones.every(z => z.boarded && z.reachable) && ev.ok };
 }
 
 // ---------------------------------------------------------------------------

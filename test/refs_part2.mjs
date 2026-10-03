@@ -70,4 +70,31 @@ export const RAW2 = {
   '14half': () => frame(D(), [2, 4, 6, 8], [0, 1, 3], { skipBrace: (i, j) => j === 1 || i === 1 }).bd(2, 8, 3).lad(8, 0, 3).lock(8).ps,
   '14one': () => frame(D(), [2, 5, 8], [0, 3], { skipBrace: (i, j) => i === 1 }).bd(2, 8, 3).lad(8, 0, 3).lock(8).ps,
   '14flop': () => D().std(2, 0, 3, 'tube', 3).std(5, 0, 3, 'tube', 3).std(8, 0, 3, 'tube', 3).led(2, 8, 3).bd(2, 8, 3).lad(8, 0, 3).ps,
+
+  // ---- bonus: Tyler's stunt tour
+  25: () => { const d = frame(D(), [1, 3, 5, 7, 9, 10], [0, 1, 3]).bd(1, 10, 3).lad(9, 0, 3).lock(9); d.ps.push({ type: 'ramp', a: [10, 3] }); return d.ps; },
+  '25noramp': () => frame(D(), [1, 3, 5, 7, 9, 10], [0, 1, 3]).bd(1, 10, 3).lad(9, 0, 3).lock(9).ps,
+  '25early': () => { const d = frame(D(), [1, 3, 5, 7, 9, 10], [0, 1, 3]).bd(1, 10, 3).lad(9, 0, 3).lock(9); d.ps.push({ type: 'ramp', a: [9, 3] }); return d.ps; },
+  26: () => { const d = frame(D(), [1, 3, 5], [0, 2, 4]).bd(1, 5, 4).lad(5, 0, 4); d.ps.push({ type: 'hatch', a: [11, 0] }); return d.ps; },
+  '26trap': () => { const d = frame(D(), [1, 3, 5, 6], [0, 2, 4]).bd(1, 4, 4).bd(4, 5, 4, 'trap').bd(5, 6, 4).lad(6, 0, 4); d.ps.push({ type: 'hatch', a: [10, 0] }); return d.ps; },
+  '26miss': () => { const d = frame(D(), [1, 3, 5], [0, 2, 4]).bd(1, 5, 4).lad(5, 0, 4); d.ps.push({ type: 'hatch', a: [9, 0] }); return d.ps; },
+  27: () => {
+    const d = frame(D(), [2, 4, 6, 8, 10, 11], [0, 2, 4, 5]);
+    frame(d, [2, 4, 6], [5, 6, 7]);
+    d.tie(2, 5).tie(6, 7).tie(11, 5);
+    d.bd(2, 11, 5).bd(10, 11, 4).bd(2, 6, 6).bd(3, 6, 7).lad(11, 0, 4).lad(11, 4, 5);
+    d.ps.push({ type: 'qpipe', a: [2, 5] }, { type: 'qpipe', a: [6, 6] }, { type: 'ramp', a: [3, 7] });
+    return d.ps;
+  },
+  28: () => { const d = frame(D(), [1, 3, 5, 7, 9, 11], [0, 1, 3]).bd(1, 11, 3).lad(9, 0, 3).lock(9); d.ps.push({ type: 'ramp', a: [3, 3] }, { type: 'qpipe', a: [11, 3] }); return d.ps; },
+  '28cheap': () => { const d = frame(D(), [1, 3, 5, 6], [0, 1, 3]).bd(1, 6, 3).lad(5, 0, 3).lock(5); d.ps.push({ type: 'qpipe', a: [6, 3] }); return d.ps; },
+  29: () => {
+    const d = frame(D(), [0, 2, 4, 6, 8, 10, 12], [0, 2, 3]);
+    frame(d, [2, 4, 6, 8, 10, 12], [3, 5, 6]);
+    frame(d, [2, 4, 6, 7], [6, 8, 9]);
+    d.tie(2, 3).tie(8, 3).tie(2, 6).tie(8, 6).tie(2, 9).tie(6, 9);
+    d.bd(0, 12, 3).bd(6, 12, 6).bd(2, 6, 9).bd(6, 7, 9, 'trap').lad(11, 0, 3).lad(11, 3, 6).lad(6, 6, 9);
+    d.ps.push({ type: 'qpipe', a: [12, 6] }, { type: 'qpipe', a: [0, 3] });
+    return d.ps;
+  },
 };
