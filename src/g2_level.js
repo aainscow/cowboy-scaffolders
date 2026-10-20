@@ -39,7 +39,7 @@ function breakObject(b, h) {
     const shardGeo = new THREE.BufferGeometry();
     shardGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0.16, 0.03, 0, 0.05, 0.2, 0], 3));
     shardGeo.computeVertexNormals();
-    const sm = M.glass.clone(); sm.side = THREE.DoubleSide;
+    const sm = shardMat;
     for (let i = 0; i < 16; i++) {
       const m = new THREE.Mesh(shardGeo, sm);
       m.position.set(gp.x + r() * b.rx, gp.y + r() * b.ry, 0.1);
@@ -64,6 +64,7 @@ function checkBreakables(hitters) {
     }
   }
 }
+const shardMat = new THREE.MeshStandardMaterial({ color: 0xbfd8e6, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
 // A brick through the glass: the pane shatters, the frame stays put.
 function smashGlass(b) {
   if (!b || b.broken || b.protected || !b.glass || !b.glass.parent) return false;
@@ -72,7 +73,7 @@ function smashGlass(b) {
   const shardGeo = new THREE.BufferGeometry();
   shardGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0.16, 0.03, 0, 0.05, 0.2, 0], 3));
   shardGeo.computeVertexNormals();
-  const sm = M.glass.clone(); sm.side = THREE.DoubleSide;
+  const sm = shardMat;
   const r = () => Math.random() - 0.5;
   for (let i = 0; i < 12; i++) {
     const m = new THREE.Mesh(shardGeo, sm);

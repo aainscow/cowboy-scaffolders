@@ -14,7 +14,9 @@ const TUBE_R = 0.03;
 
 const stageEl = document.getElementById('stage');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+// tablets and phones: a full 2x retina canvas plus soft shadows is a lot of graphics memory for Safari
+const TOUCH_DEV = (navigator.maxTouchPoints || 0) > 1 || /iPad|iPhone/.test(navigator.userAgent);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, TOUCH_DEV ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;

@@ -1,9 +1,45 @@
 // ============================================================================
 //  Sound (synthesised), overlays, input, HUD and the game flow.
 // ============================================================================
+// Something went wrong somewhere: keep going, and say what it was once so it can be reported.
+let errShown = false;
+function reportError(e, where = '') {
+  try { console.error(where, e); } catch (e2) { }
+  if (errShown) return;
+  errShown = true;
+  try {
+    const el = document.createElement('div'); el.id = 'errNote';
+    el.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:99;max-width:min(92vw,560px);background:rgba(20,24,30,.92);color:#fff;font:13px/1.35 system-ui,sans-serif;padding:8px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.2)';
+    el.textContent = `Hiccup (${where || 'game'}): ${(e && (e.message || e)) || 'unknown'}. The game carried on. Tap to hide.`;
+    el.onclick = () => el.remove();
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 12000);
+  } catch (e2) { }
+}
+window.addEventListener('error', (ev) => reportError(ev.error || ev.message, 'script'));
+window.addEventListener('unhandledrejection', (ev) => reportError(ev.reason, 'promise'));
 const sfx = (() => {
   let ctx = null, master = null, muted = false, noiseBuf = null, windNode = null, windGain = null;
   try { muted = localStorage.getItem('tf.muted') === '1'; } catch (e) { }
+  // iPhone/iPad: Web Audio is treated like a ringtone, so the silent switch (or Silent
+  // Mode in Control Centre) mutes it. Asking for a 'playback' session, or on older iOS
+  // playing a silent <audio> loop, puts the page in the media category instead.
+  let mediaEl = null;
+  function iosMedia() {
+    try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch (e) { }
+    if (navigator.audioSession || mediaEl) return;
+    try {
+      const n = 4410, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+      const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+      w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, 44100, true); v.setUint32(28, 88200, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+      mediaEl = document.createElement('audio');
+      mediaEl.setAttribute('playsinline', ''); mediaEl.setAttribute('x-webkit-airplay', 'deny');
+      mediaEl.loop = true; mediaEl.preload = 'auto';
+      mediaEl.src = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+      const pr = mediaEl.play(); if (pr && pr.catch) pr.catch(() => { mediaEl = null; });
+    } catch (e) { mediaEl = null; }
+  }
   function ensure() {
     if (muted) return false;
     if (!ctx) {
@@ -19,11 +55,23 @@ const sfx = (() => {
         windNode.connect(f); f.connect(windGain); windGain.connect(master); windNode.start();
       } catch (e) { ctx = null; return false; }
     }
-    if (ctx.state === 'suspended') ctx.resume();
+    // 'suspended' before the first tap, 'interrupted' on iOS after a call, Siri or the app going to the background
+    if (ctx.state !== 'running') { try { const pr = ctx.resume(); if (pr && pr.catch) pr.catch(() => { }); } catch (e) { } }
     return true;
   }
+  // Called straight from a tap or key press: iOS only lets sound start inside one.
+  function unlock() {
+    if (muted) return;
+    iosMedia();
+    if (!ensure()) return;
+    try { const s = ctx.createBufferSource(); s.buffer = ctx.createBuffer(1, 1, 22050); s.connect(ctx.destination); s.start(0); } catch (e) { }
+  }
+  for (const evn of ['touchend', 'pointerup', 'click', 'keydown']) window.addEventListener(evn, unlock, { capture: true, passive: true });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx && !muted && ctx.state !== 'running') { try { ctx.resume(); } catch (e) { } } });
   const now = () => ctx.currentTime;
-  function tone(freq, dur, { type = 'sine', gain = 0.3, when = 0, slide = null, attack = 0.004 } = {}) {
+  function tone(...a) { try { tone0(...a); } catch (e) { reportError(e, 'sound'); } }
+  function noise(...a) { try { noise0(...a); } catch (e) { reportError(e, 'sound'); } }
+  function tone0(freq, dur, { type = 'sine', gain = 0.3, when = 0, slide = null, attack = 0.004 } = {}) {
     if (!ensure()) return;
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, now() + when);
@@ -33,7 +81,7 @@ const sfx = (() => {
     g.gain.exponentialRampToValueAtTime(0.0001, now() + when + dur);
     o.connect(g); g.connect(master); o.start(now() + when); o.stop(now() + when + dur + 0.05);
   }
-  function noise(dur, { gain = 0.3, when = 0, type = 'lowpass', freq = 2000, q = 0.7, sweep = null } = {}) {
+  function noise0(dur, { gain = 0.3, when = 0, type = 'lowpass', freq = 2000, q = 0.7, sweep = null } = {}) {
     if (!ensure()) return;
     const s = ctx.createBufferSource(); s.buffer = noiseBuf;
     const f = ctx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq, now() + when); f.Q.value = q;
@@ -44,8 +92,8 @@ const sfx = (() => {
   }
   return {
     get muted() { return muted; },
-    toggle() { muted = !muted; try { localStorage.setItem('tf.muted', muted ? '1' : '0'); } catch (e) { } if (ctx) master.gain.value = muted ? 0 : 0.55; if (!muted) ensure(); return muted; },
-    unlock() { ensure(); },
+    toggle() { muted = !muted; try { localStorage.setItem('tf.muted', muted ? '1' : '0'); } catch (e) { } if (ctx) master.gain.value = muted ? 0 : 0.55; if (!muted) unlock(); if (mediaEl) { if (muted) mediaEl.pause(); else mediaEl.play().catch(() => { }); } return muted; },
+    unlock,
     clank(v = 1) { const b = 500 + Math.random() * 300; for (const [k, a] of [[1, 0.16], [2.63, 0.09], [4.1, 0.06], [5.9, 0.04]]) tone(b * k, 0.25 + 0.3 / k, { gain: a * v, type: 'sine' }); noise(0.03, { gain: 0.12 * v, type: 'highpass', freq: 3000 }); },
     thunk() { tone(150, 0.14, { type: 'triangle', gain: 0.3, slide: 90 }); noise(0.05, { gain: 0.12, type: 'bandpass', freq: 900, q: 1.5 }); },
     click() { tone(1800, 0.04, { gain: 0.06, type: 'square' }); },
@@ -81,7 +129,7 @@ const sfx = (() => {
     splat() { noise(0.2, { gain: 0.5, freq: 700 }); tone(90, 0.25, { type: 'sine', gain: 0.4, slide: 40 }); tone(420, 0.12, { type: 'square', gain: 0.05, slide: 150, when: 0.05 }); },
     siren() { for (let i = 0; i < 6; i++) { tone(960, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9, attack: 0.05 }); tone(720, 0.42, { type: 'triangle', gain: 0.07, when: i * 0.9 + 0.45, attack: 0.05 }); } },
     spray() { noise(1.4, { gain: 0.12, type: 'highpass', freq: 5000 }); },
-    wind(level) { if (!ctx || !windGain) return; windGain.gain.setTargetAtTime(muted ? 0 : Math.min(0.35, level / 200), now(), 0.3); },
+    wind(level) { if (!ctx || !windGain) return; try { windGain.gain.setTargetAtTime(muted ? 0 : Math.min(0.35, level / 200), now(), 0.3); } catch (e) { } },
   };
 })();
 
@@ -1016,6 +1064,7 @@ function loadLevel(i) {
   S.risk = windowsAtRisk(L);
   buildLevelScene(L);
   buildOverlay(L);
+  warmShaders();
   S.pieces = cleanPieces(save.d.designs[L.id] || []);
   S.undo = [];
   S.chain = null;
@@ -1349,8 +1398,9 @@ function stepTest(dt) {
     stepped = n / 60;
   }
   // sim events -> effects
-  for (; S.logI < tr.log.length; S.logI++) {
-    const ev = tr.log[S.logI];
+  while (S.logI < tr.log.length) {
+    const ev = tr.log[S.logI++];
+    try {
     if (ev.type === 'member') { spawnTubeDebris(ev, L); S.shake = Math.max(S.shake, 0.08); }
     else if (ev.type === 'board') {
       spawnBoardDebris(ev, L); S.shake = Math.max(S.shake, 0.1);
@@ -1358,9 +1408,12 @@ function stepTest(dt) {
       if (ev.reason === 'overload') shout(isTrap ? 'GOTCHA!' : 'SNAP!', (ev.ax + ev.bx) / 2, ev.ay + 0.6, isTrap ? 'bonus' : '');
     }
     else if (ev.type === 'tie') { wallChunks(ev.x, ev.y); sfx.crack(); shout('POP!', ev.x, ev.y + 0.5); }
+    } catch (e) { reportError(e, ev.type); }
   }
-  for (; S.evI < tr.events.length; S.evI++) {
-    const ev = tr.events[S.evI];
+  // (move past each event before acting on it, so one that goes wrong can't jam the rest)
+  while (S.evI < tr.events.length) {
+    const ev = tr.events[S.evI++];
+    try {
     if (ev.type === 'tag') { addTagDecal(ev.tag, tagDecals.length); shout('TAGGED!', ev.tag.x, ev.tag.y + 0.6); }
     else if (ev.type === 'splat') { sfx.splat(); }
     else if (ev.type === 'monster') monsterEvent(ev, S.L);
@@ -1380,6 +1433,7 @@ function stepTest(dt) {
       S.shake = Math.max(S.shake, Math.min(0.25, it.def.mass / 4000));
       if (it.def.mass >= 500) shout(it.def.mass >= 1000 ? 'THUMP!!' : 'THUMP!', it.x, it.y + 1.8);
     }
+    } catch (e) { reportError(e, ev.type); }
   }
   // party: a kick drum on the beat
   if (tr.ev && tr.ev.type === 'party' && tr.ev.partyT >= 0 && tr.ev.partyT <= S.L.event.dur) {
@@ -1727,8 +1781,8 @@ function frame(now) {
   }
 }
 function frameBody(now) {
-  const dt = Math.min(0.05, (now - lastT) / 1000);
-  lastT = now;
+  const dt = Math.max(0, Math.min(0.05, ((now || performance.now()) - lastT) / 1000)) || 0;
+  lastT = now || performance.now();
   S.t += dt;
   // camera
   camera.position.sub(S.shakeOff);
@@ -1757,8 +1811,8 @@ function frameBody(now) {
     const { hiPieces, hiBoards } = updateDesignHover();
     scaffold.update(S.designSim, { highlight: hiPieces, hiBoard: hiBoards, showTraps: true });
   } else if (S.mode === 'test' && S.trial) {
-    stepTest(dt);
-    if (S.trial) { renderTrial(dt); windNow = S.trial.sim.windAt(S.trial.sim.time); }
+    safe('step', () => stepTest(dt));
+    if (S.trial) { safe('view', () => renderTrial(dt)); windNow = S.trial.sim.windAt(S.trial.sim.time); }
   } else if (S.mode === 'title' && S.titleSim) {
     scaffold.update(S.titleSim, {});
     animatePerson(dave, S.titleDave, dt, S.t);
@@ -1791,14 +1845,15 @@ function frameBody(now) {
       if (age > life) { l.el.remove(); labels.splice(i, 1); }
     }
   }
-  updateDebris(dt);
-  updateGhosts(dt, S.t);
-  updatePolice(dt, S.t);
-  hatchView(dt);
-  sceneryTick(dt);
-  snowView(S.L, dt, S.t);
-  fireworksView(dt);
-  updateSheila(dt, S.t, S.mode === 'test' && S.trial ? { x: dave.position.x, y: dave.position.y, visible: dave.visible } : null);
+  // the bits of scenery and comedy are independent: one failing mustn't stop the others (or the render)
+  safe('debris', () => updateDebris(dt));
+  safe('ghosts', () => updateGhosts(dt, S.t));
+  safe('police', () => updatePolice(dt, S.t));
+  safe('hatch', () => hatchView(dt));
+  safe('scenery', () => sceneryTick(dt));
+  safe('snow', () => snowView(S.L, dt, S.t));
+  safe('fireworks', () => fireworksView(dt));
+  safe('sheila', () => updateSheila(dt, S.t, S.mode === 'test' && S.trial ? { x: dave.position.x, y: dave.position.y, visible: dave.visible } : null));
   for (const d of tagDecals) { d.t += dt; d.m.material.opacity = Math.min(1, d.t / 0.6); }
   let dk = S.mode === 'test' ? (S.dusk || 0) : 0;
   if (S.L && S.L.night) dk = Math.max(dk, S.mode === 'test' ? 0.9 : 0.6);
@@ -1806,13 +1861,41 @@ function frameBody(now) {
   scene.fog.color.setHex(nightSky.visible ? 0x141a2a : 0xbfd3e3);
   sun.intensity = 3.3 - 2.0 * dk; sun.color.copy(SUN_DAY).lerp(SUN_DUSK, dk);
   hemi.intensity = 0.38 - 0.18 * dk; renderer.toneMappingExposure = 0.92 - 0.22 * dk;
-  updateParticles(dt, windNow, S.L);
+  safe('particles', () => updateParticles(dt, windNow, S.L));
   // keep the sun's shadow box on the house
   sun.target.position.set(0, 3, 1);
   sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 60);
-  updateLabels();
+  safe('labels', () => updateLabels());
   renderer.render(scene, camera);
 }
+// Compile the shaders for things that only turn up mid-job (Sheila, the landlord, glass,
+// Jeff, the Gobbler) while the level loads, rather than stalling the first time they appear:
+// on an iPad that stall can be long enough to look like a freeze.
+function warmShaders() {
+  try {
+    const tmp = new THREE.Mesh(new THREE.PlaneGeometry(0.01, 0.01), shardMat); root.add(tmp);
+    const hid = [sheilaMesh, landlordMesh, kevin, gobbler.g, bike].filter(m => m && !m.visible);
+    for (const m of hid) m.visible = true;
+    renderer.compile(scene, camera);
+    for (const m of hid) m.visible = false;
+    root.remove(tmp); tmp.geometry.dispose();
+  } catch (e) { reportError(e, 'shaders'); }
+}
+// If the iPad takes the graphics away (low memory), say so instead of sitting there frozen.
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  let el = $('glLost');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'glLost';
+    el.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:100;background:rgba(10,12,16,.82);color:#fff;font:600 17px/1.4 system-ui,sans-serif;text-align:center;padding:24px';
+    el.innerHTML = 'The device ran short of graphics memory and paused the game.<br><button style="margin-top:14px;font:inherit;padding:10px 18px;border-radius:6px;border:0;background:#ff7a1a;color:#fff">Reload</button>';
+    el.querySelector('button').onclick = () => location.reload();
+    document.body.appendChild(el);
+  }
+  el.hidden = false;
+}, false);
+renderer.domElement.addEventListener('webglcontextrestored', () => { const el = $('glLost'); if (el) el.hidden = true; }, false);
+function safe(where, f) { try { f(); } catch (e) { reportError(e, where); } }
 
 // boot
 (function boot() {
@@ -1820,7 +1903,7 @@ function frameBody(now) {
   if (window.__DEBUG_DESIGN) {
     const { level, pieces, test } = window.__DEBUG_DESIGN;
     window.__proj = (x, y) => { const v = new THREE.Vector3(x, y, Z_OUT); root.localToWorld(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight]; };
-    window.__dbg = { sheilaSmash, sheila, knockPeople, ragdolls }; window.__S = S; window.__brk = () => breakables.filter(b => b.broken).map(b => b.kind); window.__fx = () => [ghosts.length, ragdolls.length, police.state, police.queue.length];
+    window.__dbg = { sheilaSmash, sheila, knockPeople, ragdolls, sfx }; window.__S = S; window.__brk = () => breakables.filter(b => b.broken).map(b => b.kind); window.__fx = () => [ghosts.length, ragdolls.length, police.state, police.queue.length];
     loadLevel(level);
     if (pieces) { S.pieces = cleanPieces(pieces); afterEdit(); }
     enterDesign();

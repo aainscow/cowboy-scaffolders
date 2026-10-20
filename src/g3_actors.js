@@ -375,6 +375,7 @@ function animatePerson(g, p, dt, t) {
   if (mode === 'rattle') { yawT = Math.PI; zT = Z_OUT + 0.85; x = p.x; }
   A.z += (zT - A.z) * Math.min(1, dt * 8);
   A.yaw += wrapAngle(yawT - A.yaw) * Math.min(1, dt * 10);
+  if (!Number.isFinite(A.yaw)) A.yaw = Number.isFinite(yawT) ? yawT : 0;
   A.phase += dt * Math.min(10, 2 + moving * 7);
   const ph = A.phase;
   const carrying = !!p.carrying;
@@ -687,7 +688,7 @@ function clearPeopleFx() {
   for (const G of ghosts) root.remove(G.g); ghosts.length = 0;
 }
 
-function wrapAngle(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+function wrapAngle(a) { if (!Number.isFinite(a)) return 0; const T = Math.PI * 2; a = ((a + Math.PI) % T + T) % T - Math.PI; return a; }
 
 // ---------------------------------------------------------------------------
 //  Loads (items)
